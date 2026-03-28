@@ -1,0 +1,170 @@
+%%
+%% This is file `sample-sigconf.tex',
+%% generated with the docstrip utility.
+%%
+%% The first command in your LaTeX source must be the \documentclass
+%% command.
+\documentclass[sigconf]{acmart}
+
+%%
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% Rights management information.  This information is sent to you
+%% when you complete the rights form.  These commands have SAMPLE
+%% values in them; it is your responsibility as an author to replace
+%% the commands and values with those provided to you when you
+%% complete the rights form.
+\setcopyright{acmlicensed}
+\copyrightyear{2026}
+\acmYear{2026}
+\acmDOI{} %  leave as is for proposal
+%% These commands are for a PROCEEDINGS abstract or paper.
+\acmConference[Comp 511 Project Proposal]{Course Project Proposal}{March 20, 2026}{Montreal, Canada}
+%%
+\acmBooktitle{Proceedings of the Comp 511: Network Science Course Projects, March 2026}
+
+
+%%
+%% For managing citations, it is recommended to use bibliography
+%% files in BibTeX format.
+%%
+\citestyle{acmauthoryear} % Using author-year style as per some ACM SIG requirements. Change to \citestyle{acmnumeric} for numbered citations if preferred.
+
+%%
+%% end of the preamble, start of the body of the document source.
+\begin{document}
+
+%%
+%% The "title" command has an optional parameter,
+%% allowing the author to define a "short title" to be used in page headers.
+\title[TGN Analysis on Amazon]{A Deep-Dive Ablation Study of Temporal Graph Networks for Dynamic Recommendation on Amazon Data}
+
+%%
+%% The "author" command and its associated commands are used to define
+%% the authors and their affiliations.
+\author{Harry Hu}
+\affiliation{%
+  \institution{McGill University}
+  \city{Montreal}
+  \country{Canada}}
+\email{harry.hu@mail.mcgill.ca}
+
+\author{Junpeng Wen}
+\affiliation{%
+  \institution{McGill University}
+  \city{Montreal}
+  \country{Canada}}
+\email{junpeng.wen@mail.mcgill.ca} 
+
+\author{Sophia Kyrychenko}
+\affiliation{%
+  \institution{McGill University}
+  \city{Montreal}
+  \country{Canada}}
+\email{sophia.kyrychenko@mail.mcgill.ca} 
+
+
+\renewcommand{\shortauthors}{Hu, Wen, Kyrychenko}
+
+%%
+%% The abstract is a short summary of the work to be presented in the
+%% article.
+\begin{abstract}
+Temporal Graph Networks (TGNs) have emerged as a powerful framework for learning on continuously evolving graph-structured data, with applications in dynamic recommendation systems. However, the relative contribution of their core components---memory modules, temporal encoding, and heterogeneous structure processing---to performance in real-world scenarios is not thoroughly quantified. This project presents a detailed ablation study focused on the next-product recommendation task using the temporal, heterogeneous Amazon product review graph from RelBench. We will implement a TGN model within the \textbf{Temporal Graph Modelling (TGM)} library framework~\cite{chmura2025tgm} and systematically evaluate the impact of key modeling decisions by selectively ablating: (1) temporal dynamics, (2) graph heterogeneity, (3) node/edge attributes, and (4) the memory module. Our work aims to provide granular insights into which aspects of TGN are most critical for recommendation performance on e-commerce data, offering practical guidance for model design and establishing a reproducible experimental benchmark. The deliverables will include a TGM-compatible data adapter for the RelBench Amazon dataset, ablation study scripts, and a comprehensive analysis report.
+\end{abstract}
+
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10002951.10003260.10003282.10003284</concept_id>
+  <concept_desc>Information systems~Recommender systems</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10010147.10010178.10010179.10010181</concept_id>
+  <concept_desc>Computing methodologies~Machine learning algorithms</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10010147.10010178.10010179.10010187</concept_id>
+  <concept_desc>Computing methodologies~Graph neural networks</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10002951.10003260.10003261.10003265</concept_id>
+  <concept_desc>Information systems~Data mining</concept_desc>
+  <concept_significance>100</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Information systems~Recommender systems}
+\ccsdesc[300]{Computing methodologies~Machine learning algorithms}
+\ccsdesc[300]{Computing methodologies~Graph neural networks}
+\ccsdesc[100]{Information systems~Data mining}
+
+%%
+%% Keywords. The author(s) should pick words that accurately describe
+%% the work being presented. Separate the keywords with commas.
+\keywords{Temporal Graph Networks, Ablation Study, Recommendation Systems, Graph Machine Learning, RelBench}
+
+%%
+%% This command processes the author and affiliation and title
+%% information and builds the first part of the formatted document.
+\maketitle
+
+\section{Introduction and Motivation}
+Modern e-commerce platforms generate vast amounts of continuously evolving, relational data, where user interactions with products form a complex temporal and heterogeneous graph. Effectively modeling this dynamic structure is fundamental to the core task of next-product recommendation. Temporal Graph Networks (TGNs) \cite{rossi2020temporal} have emerged as a leading framework for representation learning on such continuous-time dynamic graphs, achieving state-of-the-art results by integrating sophisticated components like memory modules and temporal attention mechanisms. Despite their empirical success, a critical gap remains: there is a lack of systematic, quantitative understanding of how each core component of TGNs---specifically temporal dynamics, graph heterogeneity, node/edge attributes, and the memory module---individually contributes to the model's performance in a real-world, large-scale recommendation scenario. Such an analysis is not merely an academic exercise; it is essential for guiding efficient model design, enabling targeted optimizations, and building intuition for practitioners. This project aims to address this gap by conducting a rigorous, controlled ablation study. We will dissect the TGN architecture on the challenging and realistic Amazon product recommendation graph, to provide actionable insights into which modeling aspects are most critical for performance, thereby offer practical guidance for future research and application development in temporal graph learning for recommendations.
+
+\section{Related Works}
+
+\subsection{Dynamic Graph learning}
+
+JODIE \cite{kumar2019jodie} introduced coupled recurrent networks that dynamically adjust user and item embeddings at each interaction — an architecture TGN directly generalizes through its memory module. TGAT \cite{xu2020tgat} replaced recurrence with temporal graph attention, computing node embeddings on-the-fly from a node's recent neighborhood. TGAT's own ablation demonstrates performance drops from temporal attention weights to uniform ones, showing the importance of explicit time modeling. However, both methods evaluate on homogeneous graphs. Our work extends this to typed nodes and edges.
+
+\subsection{Temporal encoding}
+
+Temporal encoding is a foundational challenge in dynamic graph learning. Time2Vec \cite{kazemi2019time2vec} established time as a learnable vector representation that can be applied to any model. The paper also conducts its own, component-level ablations as we will with TGN. TGAT extended this to the graph domain, applying time encoding in graph attention. TGN builds on this encoding but addresses TGAT's core limitation: TGAT recomputes embeddings from scratch, losing long-term information. Our memory ablation directly tests whether this persistent memory provides meaningful gains over stateless temporal attention on e-commerce data.
+
+\subsection{Heterogeneous Graph Neural Networks}
+		
+Most GNNs assume homogeneous graphs, but real-world graphs such as Amazon's product graph, contain multiple node and edge types. HGT \cite{hu2020hgt} informs our prior expectations for heterogeneity ablation. It showed on a large graph that type-specific attention consistently outperforms homogeneous GNNs. Our heterogeneity ablation experiment aims to quantify this by comparing a full heterogeneous TGN against a homogenized version on the Amazon benchmark.
+
+\subsection{Benchmarking}
+	
+Graph ML benchmarking often uses simple benchmark datasets - such as small citation networks like Cora. RelBench \cite{robinson2024relbench}  provides a benchmark suite that converts real relational databases into heterogeneous temporal graphs with typed nodes, typed edges, and complex features. Their own ablation experiments confirm that graph structure, node features, and temporal awareness all contribute to improved performances. Our work uses RelBench's Amazon data and evaluation protocol for a component-level evaluation of TGN.
+
+\subsection{Ablations}
+Ablation studies are key in understanding which architectural components drive performance in graph neural networks. LightGCN (He et al. 2020) explored this by systematically removing feature transformation and nonlinear activation from NGCF (a graph-based recommender). They found that these components degraded recommendation performance rather than helping it. LightGCN used a static homogeneous dataset, while we extend component-level ablations to a temporal, heterogeneous setting over similar data. 
+
+\section{Project Goals and Research Questions}
+This project aims to deconstruct the TGN framework within the context of the Amazon product recommendation task. Our core objective is to answer the primary research question: \textbf{What is the relative importance of the core components (temporal dynamics, heterogeneity, features, and memory) in a TGN model for the next-product prediction task on the Amazon temporal graph?} To answer this, we will investigate the performance impact of systematically ablating each component. Specifically, our study is structured around four concrete research questions. First, RQ1 focuses on temporality: we will quantify how much explicit modeling of event timestamps contributes compared to using a static graph snapshot. Second, RQ2 examines heterogeneity: we will assess the value of modeling distinct node (user, product, category) and edge (purchase, review) types versus a simplified homogeneous graph. Third, RQ3 investigates features: we will analyze how the inclusion or exclusion of node and edge attributes (e.g., review scores, category embeddings) influences prediction accuracy. Finally, RQ4 targets the memory module: we will evaluate how critical this dedicated component is for capturing long-term user preference evolution compared to a simpler aggregation mechanism.
+
+\section{Methodology}
+\subsection{Dataset and Task}
+We will use the \textbf{RelBench Amazon dataset} \cite{robinson2024relbench}, which provides a realistic temporal heterogeneous graph of user-product interactions, product categories, and reviews with timestamps. This dataset is a relational database containing 3 tables (customers, products, and reviews) and over 15 million entries shared between them. Product entries include its brand, title, description, price and category. Review entries include the review text, summary, time of review, rating, and whether the user actually bought the product. Customer entries merely include the customer's name. The earliest review available in the dataset is 1996-06-25. The primary task is \textbf{temporal link prediction}: given a user's interaction history up to time \(t\), predict the next product they will interact with (purchase) at \(t+1\). Evaluation will follow standard temporal graph benchmarking protocols using ranking metrics: Mean Reciprocal Rank (MRR) and Recall@K.
+
+\subsection{Experimental Framework}
+Our experimental methodology follows a structured pipeline. First, we will develop a \texttt{DataAdapter} for the \textbf{Temporal Graph Modelling (TGM)} library~\cite{chmura2025tgm} to load and preprocess the RelBench Amazon data, transforming it into a temporal heterogeneous graph object compatible with TGM. Subsequently, we will implement and configure a standard TGN model using TGM as our full, unablated baseline. The core of our work involves conducting a series of ablation studies. We will create four distinct variants by strategically modifying either the data input or the model configuration within the TGM framework. These variants are designed to isolate the effect of individual components: a \textit{Static} version that ignores timestamps to create a static graph; a \textit{Homogeneous} version that merges all node and edge types; a \textit{No Features} version that removes review scores and category embeddings; and a \textit{No Memory} version where TGN's memory module is replaced with simple mean pooling over historical neighbors. The performance of each ablated variant will be rigorously compared against the full TGN baseline. The relative drop in standard ranking metrics, specifically Mean Reciprocal Rank (MRR) and Recall@K, will serve as the primary quantitative measure to assess the importance of each ablated component.
+
+\section{Expected Deliverables and Timeline}
+\subsection{Deliverables}
+The project will produce two main categories of deliverables. The first is code, which will be released in a public repository. This includes the TGM \texttt{DataAdapter} for the RelBench Amazon dataset, a complete set of scripts to reproduce the baseline and all ablation experiments, and corresponding configuration files for the different model variants. The second is a comprehensive project report. This report will detail the methodology and experimental setup, present quantitative results through tables and graphs of performance metrics, provide a qualitative analysis and interpretation of the ablation study findings, and conclude with a discussion on the implications for designing practical temporal recommender systems.
+
+\subsection{Proposed Timeline}
+Our work is planned across three key phases aligned with the course milestones. From March 20 to April 3, we will focus on developing the TGM data adapter, establishing the baseline TGN model, and running the initial set of ablation experiments (e.g., Static vs. Temporal). The outcomes of this phase will be documented in the progress report due on April 3. Between April 3 and April 14, we will complete the remaining ablation studies, consolidate all results, and begin drafting the final report and analysis. The final project report, along with the complete codebase, will be submitted by the April 14 deadline.
+
+\section{Conclusion}
+This proposal outlines a focused, analytical project to dissect the TGN model's effectiveness for dynamic recommendation. By conducting a controlled ablation study on the real-world Amazon graph, we will generate actionable insights into temporal graph learning, contribute a practical data pipeline for TGM, and deliver a clear, empirical evaluation that benefits both the research community and practitioners.
+
+%%
+%% The next two lines define the bibliography style to be used, and
+%% the bibliography file.
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{my_references}
+%%
+\end{document}

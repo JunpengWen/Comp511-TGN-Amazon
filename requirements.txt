@@ -1,0 +1,10 @@
+# Comp 511 — TGN ablation on RelBench Amazon (TGM)
+# Python 3.10+
+
+torch>=2.5.1
+torch-geometric>=2.6.1
+tgm-lib>=0.1.0b1
+py-tgb>=2.0.0
+relbench>=2.0.0
+numpy>=2.0.0
+pandas>=2.2.0
