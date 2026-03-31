@@ -64,12 +64,22 @@ class RelbenchAmazonAdapter:
         *,
         from_timestamp: pd.Timestamp | None = None,
         until_timestamp: pd.Timestamp | None = None,
+        reuse_node_maps: AdapterMetadata | None = None,
     ) -> tuple[DGData, AdapterMetadata]:
         """
         until_timestamp: if set, only include reviews strictly before this time
         (e.g. train on edges before validation time).
-	from_timestamp: if set, likewise only include reviews after this time
+        from_timestamp: if set, only include reviews at or after this time
+        (inclusive lower bound; aligns val with ``[val_timestamp, test_timestamp)``).
+        reuse_node_maps: if set, use this metadata's customer/product id maps and
+        node counts so indices match a prior build (required for eval on val/test
+        windows with a model trained on the train graph).
         """
+        if not cfg.use_memory:
+            raise ValueError(
+                'AblationConfig.use_memory=False is not implemented: TGNMemory is '
+                'always used. Use --mean-agg / aggregator ablations or add a no-memory baseline.'
+            )
         db = self.db
         review = db.table_dict["review"].df.copy()
         review = review.sort_values("review_time").reset_index(drop=True)
@@ -78,16 +88,27 @@ class RelbenchAmazonAdapter:
             review = review[review["review_time"] < until_timestamp]
 
         if from_timestamp is not None:
-            review = review[review["review_time"] > from_timestamp]
+            review = review[review["review_time"] >= from_timestamp]
+
+        if reuse_node_maps is not None:
+            c_map = reuse_node_maps.customer_id_to_idx
+            p_map = reuse_node_maps.product_id_to_idx
+            n_c = reuse_node_maps.num_customers
+            n_p = reuse_node_maps.num_products
+            ck = list(c_map.keys())
+            pk = list(p_map.keys())
+            review = review[
+                review["customer_id"].isin(ck) & review["product_id"].isin(pk)
+            ]
+        else:
+            customers = sorted(review["customer_id"].unique())
+            products = sorted(review["product_id"].unique())
+            n_c, n_p = len(customers), len(products)
+            c_map = {c: i for i, c in enumerate(customers)}
+            p_map = {p: i + n_c for i, p in enumerate(products)}
 
         if cfg.max_review_edges is not None and len(review) > cfg.max_review_edges:
             review = review.iloc[: cfg.max_review_edges].copy()
-
-        customers = sorted(review["customer_id"].unique())
-        products = sorted(review["product_id"].unique())
-        n_c, n_p = len(customers), len(products)
-        c_map = {c: i for i, c in enumerate(customers)}
-        p_map = {p: i + n_c for i, p in enumerate(products)}
 
         src = review["customer_id"].map(c_map).to_numpy(np.int64)
         dst = review["product_id"].map(p_map).to_numpy(np.int64)
@@ -106,6 +127,7 @@ class RelbenchAmazonAdapter:
         # Edge features: rating + verified (RQ3)
         edge_x: torch.Tensor | None = None
         static_node_x: torch.Tensor | None = None
+        # Width for static tensors; only index 0 is filled (log1p price) for products.
         feat_dim = 8
         if cfg.use_features:
             rating = torch.tensor(review["rating"].fillna(0.0).to_numpy(), dtype=torch.float32)

@@ -11,15 +11,16 @@ McGill **Network Science** course project (see **`project_proposal.tex`**). Goal
 | Area | Description |
 |------|-------------|
 | **Dependencies** | `requirements.txt` pins `tgm-lib`, `relbench`, PyTorch / PyG, etc. |
-| **RelBench → TGM** | **`tgn_amazon/adapter.py`**: loads `rel-amazon`, keeps reviews **strictly before validation time** for training, builds a **bipartite** graph (customers ↔ products) as TGM **`DGData`**. |
-| **Configs** | **`tgn_amazon/config.py`**: **`AblationConfig`** (`static_graph`, `homogeneous`, `use_features`, `use_memory`, `max_review_edges`) and **`TrainingConfig`** (fixed `lr`, `batch_size`, `epochs`, dimensions, `seed` for fair comparisons across ablations). |
-| **Data hooks** | **`tgn_amazon/hooks.py`**: **`BipartiteProductNegativeHook`** — one negative **product** id per positive edge (avoids sampling customer nodes as fake items). |
-| **TGN model** | **`tgn_amazon/tgn_model.py`**: **`build_tgn_stack`** wires TGM **`TGNMemory`**, **`GraphAttentionEmbedding`**, **`LinkPredictor`**, optional linear fusion of static node features; **LastAggregator** vs **MeanAggregator** for RQ4. |
-| **Training** | **`tgn_amazon/training.py`**: BCE link loss, **`train_epoch`**, **`run_training_job`** (loader + hook manager + optimizer with deduplicated params for shared `time_enc`). |
+| **RelBench → TGM** | **`tgn_amazon/adapter.py`**: loads `rel-amazon`, train reviews **before** `val_timestamp`; val/test windows use **`review_time >= from_timestamp`** and **`< until_timestamp`** where applicable; **`reuse_node_maps`** for aligned ids; bipartite graph (customers ↔ products) as **`DGData`**. |
+| **Configs** | **`tgn_amazon/config.py`**: **`AblationConfig`** (`static_graph`, `homogeneous`, `use_features`, `use_memory`, `max_review_edges`) and **`TrainingConfig`**. **`use_memory=False`** raises until a no-memory baseline exists. |
+| **Data hooks** | **`tgn_amazon/hooks.py`**: **`BipartiteProductNegativeHook`** — one random **product** negative per edge (optional **`torch.Generator`** for reproducibility). |
+| **TGN model** | **`tgn_amazon/tgn_model.py`**: **`build_tgn_stack`** — **`TGNMemory`**, **`GraphAttentionEmbedding`**, **`LinkPredictor`**, optional static fusion; **LastAggregator** vs **MeanAggregator** (RQ4). |
+| **Training** | **`tgn_amazon/training.py`**: BCE on concatenated pos/neg logits (mean per logit), **`neg != dst`** masked; **`assoc`** sized with **`memory.num_nodes`** (matches global bipartite ids); **`train_epoch`**, **`run_training_job`**, optional **`replay_train_loader_for_memory`**. |
+| **Evaluation** | **`tgn_amazon/evaluation.py`**: **MRR** on val/test streams (**`eval_mrr`**, **`run_eval_job`**): random distinct product negatives, memory **`update_state`** per edge; **`_validate_num_negatives_for_eval`**; internal notes in **`MRR_EVALUATION_REVIEW.md`**. |
 | **Adapter smoke** | **`scripts/run_adapter_smoke.py`**: builds **`DGraph`**, runs **`DGDataLoader`**, prints stats. |
 | **Invariant checks** | **`scripts/verify_adapter_invariants.py`**: structural checks on bipartite IDs, times, val cutoff, loader batches. |
-| **Training CLI** | **`scripts/train_tgn_baseline.py`**: full training entrypoint (ablation flags, `--mean-agg` for MeanAggregator). |
-| **Training smoke** | **`scripts/run_training_smoke.py`**: tiny run (1000 edges, 2 epochs) for **LastAggregator** vs **MeanAggregator** to validate the training path. |
+| **Training + eval CLI** | **`scripts/train_tgn_baseline.py`**: training then **val** or **test** MRR (`--split`, `--num-negatives`, **`--replay-train-eval`**). |
+| **Training smoke** | **`scripts/run_training_smoke.py`**: small graph, 2 epochs, **LastAggregator** vs **MeanAggregator**. |
 
 **Course / writing:** `project_proposal.tex`, `511Project.txt` (deadlines, OpenReview).
 
@@ -27,11 +28,10 @@ McGill **Network Science** course project (see **`project_proposal.tex`**). Goal
 
 ## What we do next
 
-1. **Evaluation** — Align with RelBench tasks (e.g. **`user-item-purchase`** or related link tasks); implement **MRR**, **Recall@K**, and optionally **MAP@K** on held-out time splits (not only training loss).
-2. **Logging** — Save runs to **CSV** (and optional plots): config slug, epoch, train/val metrics for reproducibility and the progress/final reports.
-3. **Ablations at scale** — Run full **`AblationConfig`** sweeps (static vs temporal, homogeneous vs heterogeneous, no features, memory aggregation) with **`TrainingConfig` held fixed** after a single baseline tuning pass on validation.
-4. **Progress report (Apr 3)** — Adapter description, baseline + at least one ablation (e.g. static vs temporal), preliminary numbers.
-5. **Final report (Apr 14)** — Full tables, figures, discussion, and limitations (e.g. review-only bipartite view vs full relational schema in the proposal).
+1. **Logging** — Save runs to **CSV** (and optional plots): config slug, epoch, train/val metrics for reproducibility and reports.
+2. **More metrics / tasks** — **Recall@K**, **MAP@K**, or RelBench **task** APIs (e.g. **`user-item-purchase`**) if you need alignment beyond this repo’s bipartite MRR protocol.
+3. **Ablations at scale** — Full **`AblationConfig`** sweeps with **`TrainingConfig`** fixed after one validation tuning pass.
+4. **Progress / final reports** — Per course deadlines in **`511Project.txt`**.
 
 ---
 
@@ -83,7 +83,7 @@ pip install -r requirements.txt
 
 **Always run these from the project root** (the folder where `requirements.txt` lives). Use `cd` to that folder first, then:
 
-**Suggested order for a new machine:** (1) `run_adapter_smoke.py` with `--max-edges` — fast-ish check that data loads; (2) `verify_adapter_invariants.py` — structural checks; (3) `run_training_smoke.py` — short training run; (4) `train_tgn_baseline.py` for longer runs.
+**Suggested order for a new machine:** (1) `run_adapter_smoke.py` with `--max-edges` — data loads; (2) `verify_adapter_invariants.py` — structural checks; (3) `run_training_smoke.py` — short training; (4) `train_tgn_baseline.py` for training + MRR.
 
 ### Data pipeline (no training)
 
@@ -101,23 +101,23 @@ python scripts/run_adapter_smoke.py --max-edges 50000 --static --homo --no-feat
 python scripts/verify_adapter_invariants.py
 ```
 
-### Training
+### Training and evaluation (MRR)
 
 ```bash
-# Quick sanity check: 1000 edges, 2 epochs, LastAgg then MeanAgg
+# Quick sanity: 1000 edges, 2 epochs, LastAgg then MeanAgg
 python scripts/run_training_smoke.py
 
-# Baseline training (example: cap edges, one epoch)
+# Train (cap train edges) + val MRR (eval edges uncapped by --max-edges)
 python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1
 
-# RQ4: MeanAggregator instead of LastAggregator inside TGNMemory
-python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1 --mean-agg
+# Test split; MeanAggregator (RQ4)
+python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1 --split test --mean-agg
 
-# Match adapter ablations
-python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1 --static --homo --no-feat
+# Replay train stream in no_grad before val MRR (slow; memory warm-up heuristic)
+python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1 --replay-train-eval
 ```
 
-Common CLI flags for **`train_tgn_baseline.py`**: `--max-edges`, `--epochs`, `--batch-size`, `--lr`, `--mean-agg`, `--static`, `--homo`, `--no-feat`.
+Common flags for **`train_tgn_baseline.py`**: `--max-edges`, `--epochs`, `--batch-size`, `--lr`, `--mean-agg`, `--static`, `--homo`, `--no-feat`, **`--split` (`val` / `test`)**, **`--num-negatives`** (on large catalogs must be strictly less than `num_products - 1`; validated in **`run_eval_job`**), **`--replay-train-eval`**.
 
 ---
 
@@ -128,25 +128,29 @@ Common CLI flags for **`train_tgn_baseline.py`**: `--max-edges`, `--epochs`, `--
 | **`project_proposal.tex`** | ACM-style proposal (motivation, RQs, methodology). |
 | **`511Project.txt`** | Course deadlines and peer-review process. |
 | **`requirements.txt`** | Python dependencies. |
+| **`MRR_EVALUATION_REVIEW.md`** | Internal notes on MRR protocol and caveats. |
+| **`REFERENCES_AND_GUIDE.md`** | Stack, papers, APIs, and implementation detail. |
 | **`.gitignore`** | Ignores venvs, caches, LaTeX artifacts. |
 | **`tgn_amazon/__init__.py`** | Package exports (`AblationConfig`, `TrainingConfig`, `RelbenchAmazonAdapter`). |
-| **`tgn_amazon/config.py`** | **`AblationConfig`**: data/model ablations; **`TrainingConfig`**: shared training hyperparameters. |
-| **`tgn_amazon/adapter.py`** | **`RelbenchAmazonAdapter`**: RelBench → **`DGData`**, **`AdapterMetadata`** (counts, id maps, val/test timestamps). |
-| **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`** for TGM **`HookManager`** / **`DGDataLoader`**. |
-| **`tgn_amazon/tgn_model.py`** | **`build_tgn_stack`**: TGM TGN memory + graph attention + link predictor. |
-| **`tgn_amazon/training.py`** | **`train_epoch`**, **`run_training_job`**, **`make_train_loader`**. |
-| **`scripts/run_adapter_smoke.py`** | Smoke-test data loading and batching only. |
-| **`scripts/verify_adapter_invariants.py`** | Asserts graph/loader invariants on a capped subset. |
-| **`scripts/run_training_smoke.py`** | Minimal two-model training smoke (LastAgg vs MeanAgg). |
-| **`scripts/train_tgn_baseline.py`** | Main training script with CLI. |
+| **`tgn_amazon/config.py`** | **`AblationConfig`**, **`TrainingConfig`**. |
+| **`tgn_amazon/adapter.py`** | **`RelbenchAmazonAdapter`**: RelBench → **`DGData`**, **`AdapterMetadata`**. |
+| **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`**. |
+| **`tgn_amazon/tgn_model.py`** | **`build_tgn_stack`**. |
+| **`tgn_amazon/training.py`** | **`train_epoch`**, **`run_training_job`**, **`make_train_loader`**, replay helper. |
+| **`tgn_amazon/evaluation.py`** | **`eval_mrr`**, **`run_eval_job`**. |
+| **`scripts/run_adapter_smoke.py`** | Smoke-test data loading. |
+| **`scripts/verify_adapter_invariants.py`** | Graph/loader invariants. |
+| **`scripts/run_training_smoke.py`** | Minimal LastAgg vs MeanAgg training. |
+| **`scripts/train_tgn_baseline.py`** | Main CLI: train + MRR. |
 
 ---
 
 ## Limitations
 
-- **Graph scope:** Single **review** interaction stream (bipartite customers–products), not every entity/relation from the proposal narrative.
-- **Training objective:** Link prediction with **BCE** and random product negatives; **no** RelBench task metrics in-repo yet (MRR / Recall@K next).
-- **Neighborhoods:** Each step uses **in-batch** edges for **`GraphAttentionEmbedding`** (lightweight; not the full historical neighbor memory of the reference PyG TGN example).
+- **Graph scope:** Single **review** stream (bipartite customers–products), not every entity/relation from the proposal narrative.
+- **Metrics:** In-repo **MRR** with random product negatives on time splits; **not** RelBench’s packaged task objects or **Recall@K** / **MAP@K** unless you add them.
+- **Neighborhoods:** **In-batch** edges for **`GraphAttentionEmbedding`** (not full **`LastNeighborLoader`** history).
+- **TGM warnings:** You may see **int64 → int32** downcasting warnings from **`dg_data.py`**; usually harmless at this graph size.
 
 ---
 

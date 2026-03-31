@@ -35,7 +35,20 @@ def main() -> None:
     p.add_argument('--homo', action='store_true', help='Homogeneous graph (ablation)')
     p.add_argument('--no-feat', action='store_true', help='Strip edge/static features (ablation)')
     p.add_argument('--split', choices=['val', 'test'], default='val')
-    p.add_argument('--num-negatives', type=int, default=999)
+    p.add_argument(
+        '--num-negatives',
+        type=int,
+        default=99,
+        help=(
+            'Random product negatives per edge for MRR (1 = one neg, two candidates total). '
+            'Must be < num_products - 1 on large catalogs (validated in run_eval_job).'
+        ),
+    )
+    p.add_argument(
+        '--replay-train-eval',
+        action='store_true',
+        help='Before val MRR, replay the capped train stream in no_grad to rebuild memory (slow).',
+    )
     args = p.parse_args()
 
     abl = AblationConfig(
@@ -64,18 +77,19 @@ def main() -> None:
         label=label,
     )
 
-    num_negatives = None if args.num_negatives == 0 else args.num_negatives
+    num_neg = max(1, args.num_negatives)
     run_eval_job(
-        adapter, 
-        abl, 
+        adapter,
+        abl,
         tc,
-        memory, 
-        gnn, 
-        link_pred, 
+        memory,
+        gnn,
+        link_pred,
         static_proj,
         split=args.split,
-        num_negatives=num_negatives,
+        num_negatives=num_neg,
         label=label,
+        replay_train_before_eval=args.replay_train_eval,
     )
 
     print('Done.')
