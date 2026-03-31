@@ -230,4 +230,4 @@ def run_training_job(
         epoch_losses.append(loss)
         print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  mean_loss={loss:.6f}')
 
-    return epoch_losses
+    return epoch_losses, memory, gnn, link_pred, static_proj

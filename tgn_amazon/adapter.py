@@ -62,11 +62,13 @@ class RelbenchAmazonAdapter:
         self,
         cfg: AblationConfig,
         *,
+        from_timestamp: pd.Timestamp | None = None,
         until_timestamp: pd.Timestamp | None = None,
     ) -> tuple[DGData, AdapterMetadata]:
         """
         until_timestamp: if set, only include reviews strictly before this time
         (e.g. train on edges before validation time).
+	from_timestamp: if set, likewise only include reviews after this time
         """
         db = self.db
         review = db.table_dict["review"].df.copy()
@@ -74,6 +76,9 @@ class RelbenchAmazonAdapter:
 
         if until_timestamp is not None:
             review = review[review["review_time"] < until_timestamp]
+
+        if from_timestamp is not None:
+            review = review[review["review_time"] > from_timestamp]
 
         if cfg.max_review_edges is not None and len(review) > cfg.max_review_edges:
             review = review.iloc[: cfg.max_review_edges].copy()
