@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-from tgm import DGraph
+from tgm import DGraph, DGBatch
 from tgm.data import DGDataLoader
 from tgm.hooks import HookManager
 from tgm.nn import LinkPredictor
@@ -49,6 +49,16 @@ def _embed_nodes(
     return gnn(z, last_update, edge_index, t, raw_msg)
 
 
+def _set_tgn_memory_eval_mode(memory: TGNMemory) -> None:
+    """Inference-style memory without ``memory.eval()`` (TGM flushes all nodes on eval → OOM)."""
+    memory.training = False
+    memory.msg_s_module.eval()
+    memory.msg_d_module.eval()
+    memory.aggr_module.eval()
+    memory.time_enc.eval()
+    memory.memory_updater.eval()
+
+
 def train_epoch(
     memory: TGNMemory,
     gnn: GraphAttentionEmbedding,
@@ -75,7 +85,7 @@ def train_epoch(
         hook_manager.set_active_hooks('train')
 
     total_loss = 0.0
-    n_edges = 0
+    n_logits = 0
 
     for batch in loader:
         batch = _move_batch(batch, device)
@@ -99,7 +109,10 @@ def train_epoch(
             raise ValueError(f'neg shape {neg.shape} != dst shape {dst.shape}')
 
         n_id = torch.cat([src, dst, neg], dim=0).unique()
-        assoc = torch.empty(dg.num_nodes, dtype=torch.long, device=device)
+        # Use memory.num_nodes (adapter metadata), not dg.num_nodes: negatives are
+        # sampled in [product_lo, product_hi) and can index any global id < num_nodes,
+        # while DGraph.num_nodes may be smaller than the full bipartite id space.
+        assoc = torch.empty(memory.num_nodes, dtype=torch.long, device=device)
         assoc[n_id] = torch.arange(n_id.size(0), device=device)
 
         # GNN expects edge_index with local ids 0..len(n_id)-1 (same layout as memory(n_id)).
@@ -118,20 +131,108 @@ def train_epoch(
         )
         pos_out = link_pred(z[assoc[src]], z[assoc[dst]])
         neg_out = link_pred(z[assoc[src]], z[assoc[neg]])
-        loss = F.binary_cross_entropy_with_logits(
-            pos_out, torch.ones_like(pos_out)
-        ) + F.binary_cross_entropy_with_logits(
-            neg_out, torch.zeros_like(neg_out)
+        valid = neg != dst
+        if not valid.any():
+            memory.detach()
+            memory.update_state(src, dst, t, raw_msg)
+            continue
+        pos_logits = pos_out.squeeze(-1)[valid]
+        neg_logits = neg_out.squeeze(-1)[valid]
+        logits = torch.cat([pos_logits, neg_logits], dim=0)
+        targets = torch.cat(
+            [torch.ones_like(pos_logits), torch.zeros_like(neg_logits)], dim=0
         )
+        loss = F.binary_cross_entropy_with_logits(logits, targets, reduction='sum')
         loss.backward()
         optimizer.step()
         memory.detach()
         memory.update_state(src, dst, t, raw_msg)
 
-        total_loss += float(loss.item()) * src.size(0)
-        n_edges += int(src.size(0))
+        total_loss += float(loss.item())
+        n_logits += int(logits.numel())
 
-    return total_loss / max(n_edges, 1)
+    return total_loss / max(n_logits, 1)
+
+
+@torch.no_grad()
+def replay_train_loader_for_memory(
+    memory: TGNMemory,
+    gnn: GraphAttentionEmbedding,
+    link_pred: LinkPredictor,
+    static_proj: nn.Module | None,
+    loader: DGDataLoader,
+    dg: DGraph,
+    device: torch.device,
+    static_node_x: torch.Tensor | None,
+    raw_msg_dim: int,
+    hook_manager: HookManager | None,
+    *,
+    num_replay_epochs: int = 1,
+) -> None:
+    """Replay training edges in no_grad (no loss/optimizer).
+
+    Uses eval mode on GNN / link predictor / static projection and the TGN memory
+    eval forward path (via ``_set_tgn_memory_eval_mode``) so dropout does not
+    perturb the replay. Hook negatives are still resampled each pass, so replay is
+    not bit-identical to training.
+
+    Each replay epoch resets memory (like ``train_epoch``), then iterates the
+    loader once. ``num_replay_epochs`` should match ``TrainingConfig.epochs`` if
+    you want the same number of sweeps as training; weights still differ from
+    real training because there is no optimizer step.
+
+    This is a **heuristic** stream warm-up, not a faithful replay of learned
+    weights or of the exact memory tensors after SGD—do not describe it as exact
+    train memory in papers unless you add that caveat.
+
+    Unlike ``train_epoch``, replay does not mask ``neg == dst`` in the forward:
+    there is no BCE. Memory updates match training (full batch ``update_state``),
+    which is intentional so replay stays aligned with ``train_epoch`` memory.
+    """
+    _set_tgn_memory_eval_mode(memory)
+    gnn.eval()
+    link_pred.eval()
+    if static_proj is not None:
+        static_proj.eval()
+    sx = static_node_x.to(device) if static_node_x is not None else None
+    if hook_manager is not None:
+        hook_manager.set_active_hooks('train')
+    for _ in range(max(1, num_replay_epochs)):
+        memory.reset_state()
+        for batch in loader:
+            batch = _move_batch(batch, device)
+            if batch.edge_src.numel() == 0:
+                continue
+            if batch.neg is None:
+                raise RuntimeError(
+                    'batch.neg is missing; register BipartiteProductNegativeHook on the loader.'
+                )
+            src = batch.edge_src.long()
+            dst = batch.edge_dst.long()
+            t = batch.edge_time.long()
+            if batch.edge_x is not None:
+                raw_msg = batch.edge_x.float()
+            else:
+                raw_msg = torch.zeros(
+                    (src.size(0), raw_msg_dim), dtype=torch.float32, device=device
+                )
+            neg = batch.neg.long()
+            n_id = torch.cat([src, dst, neg], dim=0).unique()
+            assoc = torch.empty(memory.num_nodes, dtype=torch.long, device=device)
+            assoc[n_id] = torch.arange(n_id.size(0), device=device)
+            edge_index = torch.stack([assoc[src], assoc[dst]], dim=0)
+            _embed_nodes(
+                memory,
+                gnn,
+                static_proj,
+                sx,
+                n_id,
+                edge_index,
+                t,
+                raw_msg,
+            )
+            memory.detach()
+            memory.update_state(src, dst, t, raw_msg)
 
 
 def make_train_loader(
@@ -159,8 +260,17 @@ def run_training_job(
     *,
     use_last_aggregator: bool = True,
     label: str = 'TGN',
-) -> List[float]:
-    """Load train split, build TGN stack, run ``train_cfg.epochs`` epochs; return mean loss per epoch."""
+) -> Tuple[
+    List[float],
+    TGNMemory,
+    GraphAttentionEmbedding,
+    LinkPredictor,
+    nn.Module | None,
+]:
+    """Load train split, build TGN stack, run ``train_cfg.epochs`` epochs.
+
+    Returns per-epoch mean losses and the trained modules for downstream eval.
+    """
     torch.manual_seed(train_cfg.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -184,11 +294,15 @@ def run_training_job(
         device=device,
     )
 
+    hook_gen = torch.Generator(device=device)
+    hook_gen.manual_seed(train_cfg.seed)
     hm = HookManager(keys=['train'])
     hm.register(
         'train',
         BipartiteProductNegativeHook(
-            meta.num_customers, meta.num_customers + meta.num_products
+            meta.num_customers,
+            meta.num_customers + meta.num_products,
+            generator=hook_gen,
         ),
     )
 
@@ -230,4 +344,4 @@ def run_training_job(
         epoch_losses.append(loss)
         print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  mean_loss={loss:.6f}')
 
-    return epoch_losses
+    return epoch_losses, memory, gnn, link_pred, static_proj

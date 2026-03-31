@@ -29,10 +29,13 @@ class AblationConfig:
     homogeneous: bool = False
     # RQ3: features — if False, zero out edge and static node features.
     use_features: bool = True
-    # RQ4: memory — handled in training code (swap TGNMemory vs mean pooling), not in DGData.
+    # RQ4: memory aggregation is implemented in tgn_model (Last vs Mean), not here.
+    # If False, build_dgdata raises until a no-memory baseline exists.
     use_memory: bool = True
 
-    # Data limits (for debugging before full-scale runs)
+    # Data limits (for debugging before full-scale runs). Applied when building
+    # the train graph; eval in run_eval_job uses a copy with this cleared so val/test
+    # are not truncated by the same cap unless you only use one build path.
     max_review_edges: int | None = None  # None = use all edges after filters
 
     def slug(self) -> str:
