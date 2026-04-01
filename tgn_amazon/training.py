@@ -7,6 +7,9 @@ from typing import List, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
+import csv
+from datetime import datetime
+from pathlib import Path
 
 from tgm import DGraph, DGBatch
 from tgm.data import DGDataLoader
@@ -344,4 +347,17 @@ def run_training_job(
         epoch_losses.append(loss)
         print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  mean_loss={loss:.6f}')
 
+
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    csv_path = log_dir / f"{label}_{abl_cfg.slug()}_{run_id}.csv"
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["epoch", "mean_loss", "label", "config", "run_id"])
+        for ep, loss in enumerate(epoch_losses, 1):
+            writer.writerow([ep, loss, label, abl_cfg.slug(), run_id])
+
+    print(f"Logged to {csv_path}")
     return epoch_losses, memory, gnn, link_pred, static_proj
