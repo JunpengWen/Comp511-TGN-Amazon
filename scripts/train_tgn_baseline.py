@@ -23,7 +23,7 @@ from tgn_amazon.adapter import RelbenchAmazonAdapter
 from tgn_amazon.config import AblationConfig, TrainingConfig
 from tgn_amazon.training import run_training_job
 from tgn_amazon.evaluation import run_eval_job
-from tgn_amazon import RunLogger
+from tgn_amazon.RunLogger import RunLogger
 
 def main() -> None:
     p = argparse.ArgumentParser(description='Train TGN baseline (TGM) on RelBench Amazon')

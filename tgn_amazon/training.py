@@ -11,7 +11,7 @@ import csv
 from datetime import datetime
 from pathlib import Path
 import time
-from tgn_amazon import RunLogger
+from tgn_amazon.RunLogger import RunLogger
 
 from tgm import DGraph, DGBatch
 from tgm.data import DGDataLoader

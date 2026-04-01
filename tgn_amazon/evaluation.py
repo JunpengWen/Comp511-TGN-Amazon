@@ -14,7 +14,7 @@ from tgm.data import DGDataLoader
 from tgm.hooks import HookManager
 from tgm.nn import LinkPredictor
 from tgm.nn.encoder.tgn import GraphAttentionEmbedding, TGNMemory
-from tgn_amazon import RunLogger
+from tgn_amazon.RunLogger import RunLogger
 
 from tgn_amazon.adapter import AdapterMetadata, RelbenchAmazonAdapter
 from tgn_amazon.config import AblationConfig, TrainingConfig
@@ -331,7 +331,7 @@ def run_eval_job(
     num_negatives: int,
     split: str = "val",
     label: str = "TGN",
-    Logger: RunLogger | None = None,
+    logger: RunLogger | None = None,
     *,
     replay_train_before_eval: bool = False,
 ) -> Dict[str, Any]:
