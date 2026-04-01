@@ -23,6 +23,7 @@ from tgn_amazon.adapter import RelbenchAmazonAdapter
 from tgn_amazon.config import AblationConfig, TrainingConfig
 from tgn_amazon.training import run_training_job
 from tgn_amazon.evaluation import run_eval_job
+from tgn_amazon import RunLogger
 
 def main() -> None:
     p = argparse.ArgumentParser(description='Train TGN baseline (TGM) on RelBench Amazon')
@@ -62,6 +63,14 @@ def main() -> None:
         batch_size=args.batch_size,
         learning_rate=args.lr,
     )
+    # Create one logger for the whole run
+    logger = RunLogger(
+        log_dir="logs",
+        label=args.label if hasattr(args, "label") else "TGN",
+        config_slug=abl.slug(),
+    )
+    print(f"Run ID: {logger.run_id}")
+    
 
     adapter = RelbenchAmazonAdapter()
     print('Loading RelBench rel-amazon (first run may take a long time)...')
@@ -75,6 +84,7 @@ def main() -> None:
         tc,
         use_last_aggregator=not args.mean_agg,
         label=label,
+        logger=logger,  
     )
 
     num_neg = max(1, args.num_negatives)
@@ -90,6 +100,7 @@ def main() -> None:
         num_negatives=num_neg,
         label=label,
         replay_train_before_eval=args.replay_train_eval,
+        logger=logger,  
     )
 
     print('Done.')

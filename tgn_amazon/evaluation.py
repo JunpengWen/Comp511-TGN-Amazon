@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio.log import logger
 import copy
 from dataclasses import replace
 from typing import Any, Dict
@@ -13,6 +14,7 @@ from tgm.data import DGDataLoader
 from tgm.hooks import HookManager
 from tgm.nn import LinkPredictor
 from tgm.nn.encoder.tgn import GraphAttentionEmbedding, TGNMemory
+from tgn_amazon import RunLogger
 
 from tgn_amazon.adapter import AdapterMetadata, RelbenchAmazonAdapter
 from tgn_amazon.config import AblationConfig, TrainingConfig
@@ -329,6 +331,7 @@ def run_eval_job(
     num_negatives: int,
     split: str = "val",
     label: str = "TGN",
+    Logger: RunLogger | None = None,
     *,
     replay_train_before_eval: bool = False,
 ) -> Dict[str, Any]:
@@ -425,6 +428,13 @@ def run_eval_job(
         seed=train_cfg.seed,
         assoc_buf=assoc_buf,
     )
+    
+    if logger is not None:
+        logger.log_eval(
+            split=split,
+            metrics=metrics,
+            num_negatives=num_negatives,
+        )
 
     memory.load_state_dict(memory_snapshot)
     _restore_all_train_mode(memory, gnn, link_pred, static_proj)
@@ -444,5 +454,7 @@ def run_eval_job(
         )
     else:
         print(f"  [{label}] {split}  MRR={metrics['mrr']:.4f}  (MRR queries={nq})")
+    
+  
 
     return metrics

@@ -10,6 +10,8 @@ from torch import nn
 import csv
 from datetime import datetime
 from pathlib import Path
+import time
+from tgn_amazon import RunLogger
 
 from tgm import DGraph, DGBatch
 from tgm.data import DGDataLoader
@@ -263,6 +265,7 @@ def run_training_job(
     *,
     use_last_aggregator: bool = True,
     label: str = 'TGN',
+    logger: RunLogger | None = None,
 ) -> Tuple[
     List[float],
     TGNMemory,
@@ -348,16 +351,9 @@ def run_training_job(
         print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  mean_loss={loss:.6f}')
 
 
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-    csv_path = log_dir / f"{label}_{abl_cfg.slug()}_{run_id}.csv"
-
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["epoch", "mean_loss", "label", "config", "run_id"])
-        for ep, loss in enumerate(epoch_losses, 1):
-            writer.writerow([ep, loss, label, abl_cfg.slug(), run_id])
-
-    print(f"Logged to {csv_path}")
+    if logger is not None:                                
+        logger.log_epoch(epoch=ep, loss=loss)             
+ 
+ 
+                                                      
     return epoch_losses, memory, gnn, link_pred, static_proj
