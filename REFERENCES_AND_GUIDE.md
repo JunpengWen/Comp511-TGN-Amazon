@@ -22,7 +22,7 @@ These inform **motivation and RQs** (ablations, heterogeneity, etc.) but are **n
 
 ### 1.3 Course context
 
-- **`511Project.txt`** — deadlines, OpenReview, report structure (not a research paper).
+- Use your course’s posted deadlines, peer-review process, and report structure (not part of this repository).
 
 ---
 
@@ -80,7 +80,7 @@ Roughly in **data → batch → model** order:
 |-------|----------|-------------|
 | RelBench → TGM | **`tgn_amazon/adapter.py`** | Loads **`rel-amazon`**, optional **`max_review_edges`** on train builds, **`review_time < until_timestamp`** for train, **`review_time >= from_timestamp`** for val/test starts, **`reuse_node_maps`** for consistent ids; bipartite **`[0, n_c)`** / **`[n_c, n_c+n_p)`**; **`build_dgdata`** raises if **`use_memory=False`** (guard only). |
 | Ablations (data) | **`tgn_amazon/config.py`** **`AblationConfig`** | **`static_graph`**, **`homogeneous`**, **`use_features`**, **`max_review_edges`**, **`use_memory`** (slug + guard). |
-| Training hyperparameters | **`tgn_amazon/config.py`** **`TrainingConfig`** | **`lr`**, **`batch_size`**, **`epochs`**, **`memory_dim`**, **`time_dim`**, **`embedding_dim`**, **`seed`**. |
+| Training hyperparameters | **`tgn_amazon/config.py`** **`TrainingConfig`** | **`learning_rate`**, **`batch_size`**, **`epochs`**, **`memory_dim`**, **`time_dim`**, **`embedding_dim`**, **`seed`**. |
 | Bipartite negatives | **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`**: random product negatives; optional **`torch.Generator`**. |
 | Model assembly | **`tgn_amazon/tgn_model.py`** | **`build_tgn_stack`**: static fusion **`nn.Linear`** when features are on. |
 | Training | **`tgn_amazon/training.py`** | **`train_epoch`**: BCE sum over valid pos/neg logits, mean for reporting; **`assoc`** length **`memory.num_nodes`**; **`run_training_job`**, **`replay_train_loader_for_memory`** (optional eval warm-up). |
@@ -89,8 +89,6 @@ Roughly in **data → batch → model** order:
 | CLI | **`scripts/train_tgn_baseline.py`** | Training + MRR: **`--split`**, **`--num-negatives`**, **`--replay-train-eval`**, ablation flags; prints **`run_id`**, wires **`logger`** into **`run_training_job`** / **`run_eval_job`**. |
 | Smoke / invariants | **`scripts/run_adapter_smoke.py`**, **`run_training_smoke.py`**, **`verify_adapter_invariants.py`** | As in **`README.md`**. |
 | Package exports | **`tgn_amazon/__init__.py`** | **`AblationConfig`**, **`TrainingConfig`**, **`RelbenchAmazonAdapter`**. |
-| Notes | **`MRR_EVALUATION_REVIEW.md`** | Protocol details and naming (**MRR** vs typo **MMR**). |
-| Changelog (logging) | **`LOGS_CHANGES.md`** | Summary of CSV logging behavior and review fixes. |
 
 **RQ4-style comparison** is **`LastAggregator`** vs **`MeanAggregator`** inside **`TGNMemory`** (CLI **`--mean-agg`**). A true “no memory” baseline is **not** implemented; **`use_memory=False`** fails fast in **`build_dgdata`**.
 
@@ -127,7 +125,7 @@ TGM attaches **hooks** to the dataloader so each **`DGBatch`** can be augmented 
 ## 8. Evaluation (MRR) (high level)
 
 1. **`run_eval_job`** builds eval **`DGData`** with **`max_review_edges=None`** (full val/test stream), **`reuse_node_maps`** from train, and validates **`num_negatives`** vs catalog size when needed.
-2. **`eval_mrr`** iterates edges, samples negatives (small pool: **`torch`**; large pool: **NumPy `choice`**, mixed RNG — see **`MRR_EVALUATION_REVIEW.md`**), ranks **1 + K** candidates, tie-aware rank, **`memory.update_state`** per edge; does not reset memory at entry unless you use replay outside this flow.
+2. **`eval_mrr`** iterates edges, samples negatives (small pool: **`torch.randperm`**; large pool: **NumPy `choice`**, mixed RNG with **`torch.Generator`**-derived seed), ranks **1 + K** candidates, tie-aware rank, **`memory.update_state`** per edge; does not reset memory at entry unless you use replay outside this flow.
 3. **`_set_tgn_memory_eval_mode`** avoids **`TGNMemory.eval()`** OOM on large graphs.
 
 ---
@@ -147,7 +145,7 @@ TGM attaches **hooks** to the dataloader so each **`DGBatch`** can be augmented 
 1. **More metrics / RelBench tasks** — **Recall@K**, **MAP@K**, or official **RelBench** task evaluation if required for comparison.
 2. **Ablations at scale** — Sweep **`AblationConfig`** × **`TrainingConfig`** after one validation tuning pass.
 3. **Optional** — Plots or aggregation from **`logs/*.csv`**; serialized **`TrainingConfig`** per row if you need exact hyperparameters in the sheet; stronger neighbor sampling (closer to PyG **`LastNeighborLoader`**); a real **no-memory** baseline if **`use_memory`** is implemented.
-4. **Reports** — Per **`511Project.txt`**.
+4. **Reports** — Per your course’s requirements.
 
 ---
 
@@ -158,4 +156,4 @@ TGM attaches **hooks** to the dataloader so each **`DGBatch`** can be augmented 
 3. **TGM** `DGDataLoader` + **`HookManager`** — How batches are built and hooked.
 4. This repo **`adapter.py`**, **`training.py`**, **`evaluation.py`** — RelBench Amazon graph, loss, MRR.
 
-For bibliography entries used in LaTeX, see **`project_proposal.tex`** and your **`my_references.bib`** (if present).
+For bibliography entries used in LaTeX, see **`project_proposal.tex`** and whatever `.bib` file you maintain with it.

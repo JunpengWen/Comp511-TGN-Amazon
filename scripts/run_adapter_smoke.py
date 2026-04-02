@@ -3,7 +3,7 @@
 Smoke test: RelBench Amazon → DGData (TGM).
 
 Uses a small edge cap by default so you can iterate without waiting for full DB builds.
-For full data: omit --max-edges (requires rel-amazon downloaded; see TGM_SETUP.md).
+For full data: omit --max-edges (requires rel-amazon downloaded; see README.md).
 
 Usage:
   cd c:\\Comp511\\Project

@@ -83,6 +83,12 @@ class RelbenchAmazonAdapter:
         db = self.db
         review = db.table_dict["review"].df.copy()
         review = review.sort_values("review_time").reset_index(drop=True)
+        # Static ablation uses event order instead of wall-clock. Timestamps must stay
+        # on one global axis across train / val / test: per-split torch.arange(len) restarts
+        # at 0, so val edges look "before" train in TGN (LastAggregator, last_update max,
+        # GraphAttentionEmbedding rel_t). That corrupts memory and can spuriously inflate MRR.
+        if cfg.static_graph:
+            review["_global_event_rank"] = np.arange(len(review), dtype=np.int64)
 
         if until_timestamp is not None:
             review = review[review["review_time"] < until_timestamp]
@@ -115,11 +121,13 @@ class RelbenchAmazonAdapter:
         edge_index = torch.tensor(np.stack([src, dst], axis=1), dtype=torch.long)
 
         if cfg.static_graph:
-            # RQ1: ignore calendar time; keep interaction order only
-            edge_time = torch.arange(len(review), dtype=torch.long)
+            # RQ1: ignore calendar units; keep global interaction order (see _global_event_rank above).
+            edge_time = torch.tensor(
+                review.pop("_global_event_rank").to_numpy(), dtype=torch.long
+            )
             time_delta: str = "r"
         else:
-            # Unix seconds (aligned with TimeDelta 's')
+            # Unix seconds (TimeDelta 's'). Second bucketing ties many edges on rel-amazon.
             ts = review["review_time"].astype("int64") // 10**9
             edge_time = torch.tensor(ts.to_numpy(), dtype=torch.long)
             time_delta = "s"

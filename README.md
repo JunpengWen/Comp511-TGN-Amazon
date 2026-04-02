@@ -16,14 +16,14 @@ McGill **Network Science** course project (see **`project_proposal.tex`**). Goal
 | **Data hooks** | **`tgn_amazon/hooks.py`**: **`BipartiteProductNegativeHook`** — one random **product** negative per edge (optional **`torch.Generator`** for reproducibility). |
 | **TGN model** | **`tgn_amazon/tgn_model.py`**: **`build_tgn_stack`** — **`TGNMemory`**, **`GraphAttentionEmbedding`**, **`LinkPredictor`**, optional static fusion; **LastAggregator** vs **MeanAggregator** (RQ4). |
 | **Training** | **`tgn_amazon/training.py`**: BCE on concatenated pos/neg logits (mean per logit), **`neg != dst`** masked; **`assoc`** sized with **`memory.num_nodes`** (matches global bipartite ids); **`train_epoch`**, **`run_training_job`**, optional **`replay_train_loader_for_memory`**. |
-| **Evaluation** | **`tgn_amazon/evaluation.py`**: **MRR** on val/test streams (**`eval_mrr`**, **`run_eval_job`**): random distinct product negatives, memory **`update_state`** per edge; **`_validate_num_negatives_for_eval`**; internal notes in **`MRR_EVALUATION_REVIEW.md`**. |
+| **Evaluation** | **`tgn_amazon/evaluation.py`**: **MRR** on val/test streams (**`eval_mrr`**, **`run_eval_job`**): random distinct product negatives, memory **`update_state`** per edge; **`_validate_num_negatives_for_eval`**. |
 | **Adapter smoke** | **`scripts/run_adapter_smoke.py`**: builds **`DGraph`**, runs **`DGDataLoader`**, prints stats. |
 | **Invariant checks** | **`scripts/verify_adapter_invariants.py`**: structural checks on bipartite IDs, times, val cutoff, loader batches. |
 | **Training + eval CLI** | **`scripts/train_tgn_baseline.py`**: training then **val** or **test** MRR (`--split`, `--num-negatives`, **`--replay-train-eval`**). Prints a **`run_id`** and appends metrics to CSV (see **Run logging**). |
 | **Training smoke** | **`scripts/run_training_smoke.py`**: small graph, 2 epochs, **LastAggregator** vs **MeanAggregator**. |
 | **Run logging** | **`tgn_amazon/RunLogger.py`**: appends **`logs/training.csv`** (per-epoch **`mean_loss`**) and **`logs/eval.csv`** (MRR, query/skip counts). Columns **`run_id`**, **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**), **`config`** (**`AblationConfig.slug()`**, e.g. **`full`**, **`full_nofeat`**, **`full_static_homo_nofeat`**) tie rows across files. |
 
-**Course / writing:** `project_proposal.tex`, `511Project.txt` (deadlines, OpenReview).
+**Course / writing:** `project_proposal.tex` (proposal); follow your course’s deadlines and submission rules separately.
 
 ---
 
@@ -32,7 +32,7 @@ McGill **Network Science** course project (see **`project_proposal.tex`**). Goal
 1. **More metrics / tasks** — **Recall@K**, **MAP@K**, or RelBench **task** APIs (e.g. **`user-item-purchase`**) if you need alignment beyond this repo’s bipartite MRR protocol.
 2. **Ablations at scale** — Full **`AblationConfig`** sweeps with **`TrainingConfig`** fixed after one validation tuning pass.
 3. **Optional** — Plots or dashboards from **`logs/*.csv`**; richer columns if you need **`TrainingConfig`** serialized per run.
-4. **Progress / final reports** — Per course deadlines in **`511Project.txt`**.
+4. **Progress / final reports** — Per your course’s schedule.
 
 ---
 
@@ -129,12 +129,8 @@ Each CLI run prints **`Run ID: …`** and appends to **`logs/training.csv`** and
 | Path | Role |
 |------|------|
 | **`project_proposal.tex`** | ACM-style proposal (motivation, RQs, methodology). |
-| **`511Project.txt`** | Course deadlines and peer-review process. |
 | **`requirements.txt`** | Python dependencies. |
-| **`MRR_EVALUATION_REVIEW.md`** | Internal notes on MRR protocol and caveats. |
-| **`LOGS_CHANGES.md`** | Short changelog for run logging (CSV columns and fixes). |
 | **`REFERENCES_AND_GUIDE.md`** | Stack, papers, APIs, and implementation detail. |
-| **`logs/`** | Default output for **`RunLogger`** (`training.csv`, `eval.csv`); safe to add to **`.gitignore`** if you do not want commits. |
 | **`.gitignore`** | Ignores venvs, caches, LaTeX artifacts. |
 | **`tgn_amazon/__init__.py`** | Package exports (`AblationConfig`, `TrainingConfig`, `RelbenchAmazonAdapter`). |
 | **`tgn_amazon/config.py`** | **`AblationConfig`**, **`TrainingConfig`**. |
@@ -162,4 +158,4 @@ Each CLI run prints **`Run ID: …`** and appends to **`logs/training.csv`** and
 
 ## License / data
 
-Follow **RelBench** and **Amazon review data** terms for `rel-amazon`. Cite **TGM**, **RelBench**, and **TGN** in the report (`my_references.bib` with the proposal if you use BibTeX).
+Follow **RelBench** and **Amazon review data** terms for `rel-amazon`. Cite **TGM**, **RelBench**, and **TGN** in the report (for example via BibTeX alongside `project_proposal.tex`).
