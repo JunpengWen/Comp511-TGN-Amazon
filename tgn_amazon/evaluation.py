@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from asyncio.log import logger
 import copy
 from dataclasses import replace
 from typing import Any, Dict
@@ -454,7 +453,5 @@ def run_eval_job(
         )
     else:
         print(f"  [{label}] {split}  MRR={metrics['mrr']:.4f}  (MRR queries={nq})")
-    
-  
 
     return metrics

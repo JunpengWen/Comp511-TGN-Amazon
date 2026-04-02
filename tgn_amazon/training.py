@@ -7,10 +7,7 @@ from typing import List, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
-import csv
-from datetime import datetime
-from pathlib import Path
-import time
+
 from tgn_amazon.RunLogger import RunLogger
 
 from tgm import DGraph, DGBatch
@@ -349,11 +346,7 @@ def run_training_job(
         )
         epoch_losses.append(loss)
         print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  mean_loss={loss:.6f}')
+        if logger is not None:
+            logger.log_epoch(epoch=ep, loss=loss)
 
-
-    if logger is not None:                                
-        logger.log_epoch(epoch=ep, loss=loss)             
- 
- 
-                                                      
     return epoch_losses, memory, gnn, link_pred, static_proj

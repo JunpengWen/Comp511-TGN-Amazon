@@ -63,20 +63,17 @@ def main() -> None:
         batch_size=args.batch_size,
         learning_rate=args.lr,
     )
-    # Create one logger for the whole run
+    label = 'TGN+MeanAgg' if args.mean_agg else 'TGN+LastAgg'
     logger = RunLogger(
         log_dir="logs",
-        label=args.label if hasattr(args, "label") else "TGN",
+        label=label,
         config_slug=abl.slug(),
     )
     print(f"Run ID: {logger.run_id}")
-    
 
     adapter = RelbenchAmazonAdapter()
     print('Loading RelBench rel-amazon (first run may take a long time)...')
     adapter.load(download=True)
-
-    label = 'TGN+MeanAgg' if args.mean_agg else 'TGN+LastAgg'
     print(f'Ablation: {abl.slug()}  |  training: {tc}  |  {label}')
     _, memory, gnn, link_pred, static_proj = run_training_job(
         adapter,
@@ -84,7 +81,7 @@ def main() -> None:
         tc,
         use_last_aggregator=not args.mean_agg,
         label=label,
-        logger=logger,  
+        logger=logger,
     )
 
     num_neg = max(1, args.num_negatives)
@@ -100,7 +97,7 @@ def main() -> None:
         num_negatives=num_neg,
         label=label,
         replay_train_before_eval=args.replay_train_eval,
-        logger=logger,  
+        logger=logger,
     )
 
     print('Done.')
