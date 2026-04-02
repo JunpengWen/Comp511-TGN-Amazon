@@ -84,13 +84,24 @@ Roughly in **data → batch → model** order:
 | Bipartite negatives | **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`**: random product negatives; optional **`torch.Generator`**. |
 | Model assembly | **`tgn_amazon/tgn_model.py`** | **`build_tgn_stack`**: static fusion **`nn.Linear`** when features are on. |
 | Training | **`tgn_amazon/training.py`** | **`train_epoch`**: BCE sum over valid pos/neg logits, mean for reporting; **`assoc`** length **`memory.num_nodes`**; **`run_training_job`**, **`replay_train_loader_for_memory`** (optional eval warm-up). |
-| Evaluation | **`tgn_amazon/evaluation.py`** | **`eval_mrr`**: **MRR** with **`K`** random distinct product negatives; **`run_eval_job`**: uncapped eval graph, **`_validate_num_negatives_for_eval`**, optional replay; metrics include skip counts. |
-| CLI | **`scripts/train_tgn_baseline.py`** | Training + MRR: **`--split`**, **`--num-negatives`**, **`--replay-train-eval`**, ablation flags. |
+| Evaluation | **`tgn_amazon/evaluation.py`** | **`eval_mrr`**: **MRR** with **`K`** random distinct product negatives; **`run_eval_job`**: uncapped eval graph, **`_validate_num_negatives_for_eval`**, optional replay; metrics include skip counts; optional **`RunLogger`** after MRR. |
+| Run logging | **`tgn_amazon/RunLogger.py`** | **`RunLogger`**: append-only CSV under **`log_dir`** (default **`logs/`**). Shared **`run_id`** per process run; **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**); **`config`** = **`AblationConfig.slug()`** (distinguishes **`--no-feat`** as **`full_nofeat`**, **`--static`** / **`--homo`** as extra suffixes, etc.). |
+| CLI | **`scripts/train_tgn_baseline.py`** | Training + MRR: **`--split`**, **`--num-negatives`**, **`--replay-train-eval`**, ablation flags; prints **`run_id`**, wires **`logger`** into **`run_training_job`** / **`run_eval_job`**. |
 | Smoke / invariants | **`scripts/run_adapter_smoke.py`**, **`run_training_smoke.py`**, **`verify_adapter_invariants.py`** | As in **`README.md`**. |
 | Package exports | **`tgn_amazon/__init__.py`** | **`AblationConfig`**, **`TrainingConfig`**, **`RelbenchAmazonAdapter`**. |
 | Notes | **`MRR_EVALUATION_REVIEW.md`** | Protocol details and naming (**MRR** vs typo **MMR**). |
+| Changelog (logging) | **`LOGS_CHANGES.md`** | Summary of CSV logging behavior and review fixes. |
 
 **RQ4-style comparison** is **`LastAggregator`** vs **`MeanAggregator`** inside **`TGNMemory`** (CLI **`--mean-agg`**). A true “no memory” baseline is **not** implemented; **`use_memory=False`** fails fast in **`build_dgdata`**.
+
+**CSV outputs (default paths):**
+
+| File | Columns (high level) |
+|------|----------------------|
+| **`logs/training.csv`** | **`run_id`**, **`label`**, **`config`**, **`epoch`**, **`mean_loss`**, **`timestamp`** — one row per completed training epoch. |
+| **`logs/eval.csv`** | **`run_id`**, **`label`**, **`config`**, **`split`**, **`num_negatives`**, **`mrr`** (6 decimal places), **`n_queries`**, **`n_skipped_no_pool`**, **`n_skipped_full_catalog`**, **`timestamp`** — one row per **`run_eval_job`** call. |
+
+**`scripts/run_training_smoke.py`** does not instantiate **`RunLogger`**; use **`train_tgn_baseline.py`** (or pass a logger from your own script) for CSV logs.
 
 ---
 
@@ -133,11 +144,10 @@ TGM attaches **hooks** to the dataloader so each **`DGBatch`** can be augmented 
 
 ## 10. Future work (planned)
 
-1. **Logging** — CSV (and optional plots): config slug, epoch, train/val metrics.
-2. **More metrics / RelBench tasks** — **Recall@K**, **MAP@K**, or official **RelBench** task evaluation if required for comparison.
-3. **Ablations at scale** — Sweep **`AblationConfig`** × **`TrainingConfig`** after one validation tuning pass.
-4. **Optional** — Stronger neighbor sampling (closer to PyG **`LastNeighborLoader`**); a real **no-memory** baseline if **`use_memory`** is implemented.
-5. **Reports** — Per **`511Project.txt`**.
+1. **More metrics / RelBench tasks** — **Recall@K**, **MAP@K**, or official **RelBench** task evaluation if required for comparison.
+2. **Ablations at scale** — Sweep **`AblationConfig`** × **`TrainingConfig`** after one validation tuning pass.
+3. **Optional** — Plots or aggregation from **`logs/*.csv`**; serialized **`TrainingConfig`** per row if you need exact hyperparameters in the sheet; stronger neighbor sampling (closer to PyG **`LastNeighborLoader`**); a real **no-memory** baseline if **`use_memory`** is implemented.
+4. **Reports** — Per **`511Project.txt`**.
 
 ---
 

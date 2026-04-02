@@ -8,6 +8,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from tgn_amazon.RunLogger import RunLogger
+
 from tgm import DGraph, DGBatch
 from tgm.data import DGDataLoader
 from tgm.hooks import HookManager
@@ -260,6 +262,7 @@ def run_training_job(
     *,
     use_last_aggregator: bool = True,
     label: str = 'TGN',
+    logger: RunLogger | None = None,
 ) -> Tuple[
     List[float],
     TGNMemory,
@@ -343,5 +346,7 @@ def run_training_job(
         )
         epoch_losses.append(loss)
         print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  mean_loss={loss:.6f}')
+        if logger is not None:
+            logger.log_epoch(epoch=ep, loss=loss)
 
     return epoch_losses, memory, gnn, link_pred, static_proj
