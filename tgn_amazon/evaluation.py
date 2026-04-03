@@ -175,11 +175,14 @@ def eval_mrr(
 
     When the product pool cannot supply ``k`` distinct negatives != ``dst``, fewer
     negatives are used (no padding with duplicates). Edges with no valid negative
-    at all are skipped for MRR but still advance ``update_state`` so memory stays
-    aligned with the stream. Skips are counted in ``n_skipped_no_negative_pool``;
+    at     all are skipped for MRR but still advance ``update_state`` so memory stays
+    aligned with the stream.
+    Skips are counted in ``n_skipped_no_negative_pool``;
     ``n_skipped_would_materialize_full_catalog`` counts large-pool queries that
     would require sampling every distinct negative (defensive; ``run_eval_job``
     validates ``num_negatives`` upfront).
+    ``n_skipped_invalid_node_ids`` counts rows where ``src``, ``dst``, or a negative
+    is out of range for ``train_meta.num_nodes`` (should be zero on clean data).
 
     Does **not** reset memory at entry: starts from post-training or post-replay state.
     """
@@ -203,6 +206,7 @@ def eval_mrr(
     n_queries = 0
     n_skipped_no_pool = 0
     n_skipped_would_materialize_full_catalog = 0
+    n_skipped_invalid_node_ids = 0
 
     if assoc_buf is None:
         assoc_buf = torch.empty(num_nodes, dtype=torch.long, device=device)
@@ -222,15 +226,19 @@ def eval_mrr(
             dst = batch.edge_dst.long()
             t = batch.edge_time.long()
 
-            known = (src < num_nodes) & (dst < num_nodes)
-            src = src[known]
-            dst = dst[known]
-            t = t[known]
+            if src.numel() > 0:
+                in_range = (src < num_nodes) & (dst < num_nodes)
+                if not bool(in_range.all().item()):
+                    raise ValueError(
+                        'eval_mrr: batch contains src or dst outside [0, num_nodes). '
+                        f'num_nodes={num_nodes}. Transductive maps or adapter metadata may be inconsistent.'
+                    )
+
             if src.numel() == 0:
                 continue
 
             if batch.edge_x is not None:
-                edge_x = batch.edge_x[known].float()
+                edge_x = batch.edge_x.float()
             else:
                 edge_x = None
 
@@ -261,14 +269,30 @@ def eval_mrr(
                 negs = negs_t.squeeze(0)
 
                 cand = torch.cat([dst[i : i + 1], negs], dim=0)
-                n_id = torch.cat([src[i : i + 1], cand], dim=0).unique()
-                n_id = n_id[n_id < num_nodes]
+                si, di = int(src[i].item()), int(dst[i].item())
+                if si >= num_nodes or di >= num_nodes or (negs >= num_nodes).any():
+                    n_skipped_invalid_node_ids += 1
+                    memory.detach()
+                    memory.update_state(
+                        src[i : i + 1],
+                        dst[i : i + 1],
+                        t[i : i + 1],
+                        raw_msg_i,
+                    )
+                    continue
 
+                n_id = torch.cat([src[i : i + 1], cand], dim=0).unique()
                 assoc_buf[n_id] = torch.arange(n_id.size(0), device=device)
 
+                # One src→candidate edge per candidate so TransformerConv treats dst and negs alike.
+                num_c = cand.size(0)
+                s_loc = assoc_buf[src[i]]
                 edge_index = torch.stack(
-                    [assoc_buf[src[i]], assoc_buf[dst[i]]], dim=0
-                ).unsqueeze(1)
+                    [s_loc.expand(num_c), assoc_buf[cand]],
+                    dim=0,
+                )
+                t_mult = t[i : i + 1].expand(num_c)
+                raw_msg_mult = raw_msg_i.expand(num_c, -1)
 
                 z = _embed_nodes(
                     memory,
@@ -277,8 +301,8 @@ def eval_mrr(
                     sx,
                     n_id,
                     edge_index,
-                    t[i : i + 1],
-                    raw_msg_i,
+                    t_mult,
+                    raw_msg_mult,
                 )
 
                 s_idx = assoc_buf[src[i]]
@@ -309,6 +333,7 @@ def eval_mrr(
             "n_queries": 0,
             "n_skipped_no_negative_pool": n_skipped_no_pool,
             "n_skipped_would_materialize_full_catalog": n_skipped_would_materialize_full_catalog,
+            "n_skipped_invalid_node_ids": n_skipped_invalid_node_ids,
         }
 
     return {
@@ -316,6 +341,7 @@ def eval_mrr(
         "n_queries": n_queries,
         "n_skipped_no_negative_pool": n_skipped_no_pool,
         "n_skipped_would_materialize_full_catalog": n_skipped_would_materialize_full_catalog,
+        "n_skipped_invalid_node_ids": n_skipped_invalid_node_ids,
     }
 
 
@@ -440,13 +466,16 @@ def run_eval_job(
 
     skipped = int(metrics.get("n_skipped_no_negative_pool", 0))
     skipped_full = int(metrics.get("n_skipped_would_materialize_full_catalog", 0))
+    skipped_oob = int(metrics.get("n_skipped_invalid_node_ids", 0))
     nq = int(metrics.get("n_queries", 0))
-    if skipped or skipped_full:
+    if skipped or skipped_full or skipped_oob:
         extra = []
         if skipped:
             extra.append(f"{skipped} no-pool")
         if skipped_full:
             extra.append(f"{skipped_full} would need full catalog")
+        if skipped_oob:
+            extra.append(f"{skipped_oob} invalid-node-id")
         print(
             f"  [{label}] {split}  MRR={metrics['mrr']:.4f}  "
             f"(MRR queries={nq}, skipped: {', '.join(extra)})"

@@ -40,7 +40,11 @@ def main() -> None:
     assert t.numel() == meta.num_edges
 
     # Same filter as adapter: no review at or after val (avoid timezone issues from .timestamp())
-    if not dg.time_delta.is_event_ordered:
+    try:
+        event_ordered = bool(dg.time_delta.is_event_ordered)
+    except AttributeError:
+        event_ordered = False
+    if not event_ordered:
         rev = adapter.db.table_dict["review"].df
         rev = rev.sort_values("review_time").reset_index(drop=True)
         rev = rev[rev["review_time"] < val_ts]

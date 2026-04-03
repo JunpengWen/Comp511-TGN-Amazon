@@ -23,11 +23,12 @@ class TrainingConfig:
 class AblationConfig:
     """Maps to proposal ablations: Static, Homogeneous, No Features, No Memory."""
 
-    # RQ1: temporality — if True, use event-rank times only (no calendar time).
+    # RQ1: temporality — if True, omit wall-clock edge times: constant zeros + time_delta "r"
+    # (see adapter.build_dgdata; no global ordinal ranks, no calendar seconds).
     static_graph: bool = False
     # RQ2: heterogeneity — if True, drop explicit node_type / edge_type tensors.
     homogeneous: bool = False
-    # RQ3: features — if False, zero out edge and static node features.
+    # RQ3: features — if False, omit edge_x and static_node_x (no extra input channels).
     use_features: bool = True
     # RQ4: memory aggregation is implemented in tgn_model (Last vs Mean), not here.
     # If False, build_dgdata raises until a no-memory baseline exists.

@@ -32,9 +32,17 @@ def main() -> None:
     p.add_argument('--batch-size', type=int, default=512)
     p.add_argument('--lr', type=float, default=1e-4)
     p.add_argument('--mean-agg', action='store_true', help='Use MeanAggregator instead of LastAggregator (RQ4)')
-    p.add_argument('--static', action='store_true', help='Static/event-order time (ablation)')
+    p.add_argument(
+        '--static',
+        action='store_true',
+        help='Static graph ablation: constant edge times (no wall-clock; adapter uses zeros, time_delta r)',
+    )
     p.add_argument('--homo', action='store_true', help='Homogeneous graph (ablation)')
-    p.add_argument('--no-feat', action='store_true', help='Strip edge/static features (ablation)')
+    p.add_argument(
+        '--no-feat',
+        action='store_true',
+        help='No-features ablation: omit edge_x and static_node_x (no static_proj)',
+    )
     p.add_argument('--split', choices=['val', 'test'], default='val')
     p.add_argument(
         '--num-negatives',

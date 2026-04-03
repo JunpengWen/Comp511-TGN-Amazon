@@ -21,7 +21,7 @@ McGill **Network Science** course project (see **`project_proposal.tex`**). Goal
 | **Invariant checks** | **`scripts/verify_adapter_invariants.py`**: structural checks on bipartite IDs, times, val cutoff, loader batches. |
 | **Training + eval CLI** | **`scripts/train_tgn_baseline.py`**: training then **val** or **test** MRR (`--split`, `--num-negatives`, **`--replay-train-eval`**). Prints a **`run_id`** and appends metrics to CSV (see **Run logging**). |
 | **Training smoke** | **`scripts/run_training_smoke.py`**: small graph, 2 epochs, **LastAggregator** vs **MeanAggregator**. |
-| **Run logging** | **`tgn_amazon/RunLogger.py`**: appends **`logs/training.csv`** (per-epoch **`mean_loss`**) and **`logs/eval.csv`** (MRR, query/skip counts). Columns **`run_id`**, **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**), **`config`** (**`AblationConfig.slug()`**, e.g. **`full`**, **`full_nofeat`**, **`full_static_homo_nofeat`**) tie rows across files. |
+| **Run logging** | **`tgn_amazon/RunLogger.py`**: appends **`logs/training.csv`** (per-epoch **`mean_loss`**) and **`logs/eval.csv`** (**`mrr`**, **`n_queries`**, **`n_skipped_no_negative_pool`**, **`n_skipped_would_materialize_full_catalog`**, **`n_skipped_invalid_node_ids`**). Columns **`run_id`**, **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**), **`config`** (**`AblationConfig.slug()`**) tie rows across files. |
 
 **Course / writing:** `project_proposal.tex` (proposal); follow your course’s deadlines and submission rules separately.
 
@@ -149,10 +149,12 @@ Each CLI run prints **`Run ID: …`** and appends to **`logs/training.csv`** and
 
 ## Limitations
 
+- **Transductive val/test:** When **`reuse_node_maps`** is used for evaluation, the adapter keeps only reviews whose **`customer_id`** and **`product_id`** appear in the train-time maps. Cold-start users or products are **dropped** (not scored). Printed edge counts (for example on val) are **after** this filter—state that explicitly in reports if you compare to “full” RelBench wording.
 - **Graph scope:** Single **review** stream (bipartite customers–products), not every entity/relation from the proposal narrative.
 - **Metrics:** In-repo **MRR** with random product negatives on time splits; **not** RelBench’s packaged task objects or **Recall@K** / **MAP@K** unless you add them.
 - **Neighborhoods:** **In-batch** edges for **`GraphAttentionEmbedding`** (not full **`LastNeighborLoader`** history).
 - **TGM warnings:** You may see **int64 → int32** downcasting warnings from **`dg_data.py`**; usually harmless at this graph size.
+- **Log CSV schema:** If **`logs/eval.csv`** was written with an older header (fewer columns), archive or delete it before running a newer CLI so appended rows stay aligned with the current column list.
 
 ---
 

@@ -32,9 +32,13 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Build DGData from RelBench Amazon")
     p.add_argument("--max-edges", type=int, default=50_000, help="Cap reviews for quick tests")
     p.add_argument("--full", action="store_true", help="Use all edges (no cap)")
-    p.add_argument("--static", action="store_true", help="Ablation: static/event-order time")
+    p.add_argument(
+        "--static",
+        action="store_true",
+        help="Ablation: constant edge times (no wall-clock; see adapter static_graph)",
+    )
     p.add_argument("--homo", action="store_true", help="Ablation: homogeneous (no type tensors)")
-    p.add_argument("--no-feat", action="store_true", help="Ablation: strip features")
+    p.add_argument("--no-feat", action="store_true", help="Ablation: omit edge_x / static_node_x")
     args = p.parse_args()
 
     cfg = AblationConfig(

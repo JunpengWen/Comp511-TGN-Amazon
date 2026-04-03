@@ -117,8 +117,17 @@ def train_epoch(
         assoc = torch.empty(memory.num_nodes, dtype=torch.long, device=device)
         assoc[n_id] = torch.arange(n_id.size(0), device=device)
 
-        # GNN expects edge_index with local ids 0..len(n_id)-1 (same layout as memory(n_id)).
-        edge_index = torch.stack([assoc[src], assoc[dst]], dim=0)
+        # GNN: one edge per (src, candidate) so pos and neg get symmetric conv updates.
+        # Using only (src, dst) would let dst absorb src's message while negs do not — scores
+        # would trivially favor dst (inflated MRR).
+        # Rows with neg == dst are omitted from BCE but still participate in this subgraph (shared
+        # src/other nodes); masked pairs do not contribute to the loss sum.
+        edge_index = torch.stack(
+            [torch.cat([assoc[src], assoc[src]], dim=0), torch.cat([assoc[dst], assoc[neg]], dim=0)],
+            dim=0,
+        )
+        t_pair = torch.cat([t, t], dim=0)
+        raw_pair = torch.cat([raw_msg, raw_msg], dim=0)
 
         optimizer.zero_grad(set_to_none=True)
         z = _embed_nodes(
@@ -128,8 +137,8 @@ def train_epoch(
             sx,
             n_id,
             edge_index,
-            t,
-            raw_msg,
+            t_pair,
+            raw_pair,
         )
         pos_out = link_pred(z[assoc[src]], z[assoc[dst]])
         neg_out = link_pred(z[assoc[src]], z[assoc[neg]])
@@ -222,7 +231,15 @@ def replay_train_loader_for_memory(
             n_id = torch.cat([src, dst, neg], dim=0).unique()
             assoc = torch.empty(memory.num_nodes, dtype=torch.long, device=device)
             assoc[n_id] = torch.arange(n_id.size(0), device=device)
-            edge_index = torch.stack([assoc[src], assoc[dst]], dim=0)
+            edge_index = torch.stack(
+                [
+                    torch.cat([assoc[src], assoc[src]], dim=0),
+                    torch.cat([assoc[dst], assoc[neg]], dim=0),
+                ],
+                dim=0,
+            )
+            t_pair = torch.cat([t, t], dim=0)
+            raw_pair = torch.cat([raw_msg, raw_msg], dim=0)
             _embed_nodes(
                 memory,
                 gnn,
@@ -230,8 +247,8 @@ def replay_train_loader_for_memory(
                 sx,
                 n_id,
                 edge_index,
-                t,
-                raw_msg,
+                t_pair,
+                raw_pair,
             )
             memory.detach()
             memory.update_state(src, dst, t, raw_msg)

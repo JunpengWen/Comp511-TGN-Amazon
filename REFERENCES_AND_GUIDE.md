@@ -97,7 +97,7 @@ Roughly in **data → batch → model** order:
 | File | Columns (high level) |
 |------|----------------------|
 | **`logs/training.csv`** | **`run_id`**, **`label`**, **`config`**, **`epoch`**, **`mean_loss`**, **`timestamp`** — one row per completed training epoch. |
-| **`logs/eval.csv`** | **`run_id`**, **`label`**, **`config`**, **`split`**, **`num_negatives`**, **`mrr`** (6 decimal places), **`n_queries`**, **`n_skipped_no_pool`**, **`n_skipped_full_catalog`**, **`timestamp`** — one row per **`run_eval_job`** call. |
+| **`logs/eval.csv`** | **`run_id`**, **`label`**, **`config`**, **`split`**, **`num_negatives`**, **`mrr`** (6 decimal places), **`n_queries`**, **`n_skipped_no_negative_pool`**, **`n_skipped_would_materialize_full_catalog`**, **`n_skipped_invalid_node_ids`**, **`timestamp`** — one row per **`run_eval_job`** call. |
 
 **`scripts/run_training_smoke.py`** does not instantiate **`RunLogger`**; use **`train_tgn_baseline.py`** (or pass a logger from your own script) for CSV logs.
 

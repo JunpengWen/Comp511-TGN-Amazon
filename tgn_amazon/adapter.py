@@ -83,13 +83,6 @@ class RelbenchAmazonAdapter:
         db = self.db
         review = db.table_dict["review"].df.copy()
         review = review.sort_values("review_time").reset_index(drop=True)
-        # Static ablation uses event order instead of wall-clock. Timestamps must stay
-        # on one global axis across train / val / test: per-split torch.arange(len) restarts
-        # at 0, so val edges look "before" train in TGN (LastAggregator, last_update max,
-        # GraphAttentionEmbedding rel_t). That corrupts memory and can spuriously inflate MRR.
-        if cfg.static_graph:
-            review["_global_event_rank"] = np.arange(len(review), dtype=np.int64)
-
         if until_timestamp is not None:
             review = review[review["review_time"] < until_timestamp]
 
@@ -121,10 +114,11 @@ class RelbenchAmazonAdapter:
         edge_index = torch.tensor(np.stack([src, dst], axis=1), dtype=torch.long)
 
         if cfg.static_graph:
-            # RQ1: ignore calendar units; keep global interaction order (see _global_event_rank above).
-            edge_time = torch.tensor(
-                review.pop("_global_event_rank").to_numpy(), dtype=torch.long
-            )
+            # RQ1: no wall-clock time and no per-edge ordinal ids. Global interaction ranks
+            # (e.g. np.arange on the full table before filtering) preserve split order and act
+            # like perfect temporal features, which can spuriously inflate metrics. Constant times
+            # remove that signal so "static" is a true no-time ablation for TGN memory/GNN time.
+            edge_time = torch.zeros(len(review), dtype=torch.long)
             time_delta: str = "r"
         else:
             # Unix seconds (TimeDelta 's'). Second bucketing ties many edges on rel-amazon.
@@ -150,12 +144,20 @@ class RelbenchAmazonAdapter:
             static_node_x = torch.zeros((n_c + n_p, feat_dim), dtype=torch.float32)
             prod_df = db.table_dict["product"].df.set_index("product_id")
             for p, nid in p_map.items():
-                if p in prod_df.index:
-                    price = prod_df.loc[p, "price"]
-                    if price is not None and not (isinstance(price, float) and np.isnan(price)):
-                        static_node_x[nid, 0] = float(np.log1p(float(price)))
+                if p not in prod_df.index:
+                    continue
+                price = prod_df.loc[p, "price"]
+                if isinstance(price, pd.Series):
+                    price = price.iloc[0]
+                if price is None or (isinstance(price, float) and np.isnan(price)):
+                    continue
+                try:
+                    static_node_x[nid, 0] = float(np.log1p(float(price)))
+                except (TypeError, ValueError):
+                    continue
         else:
-            static_node_x = torch.zeros((n_c + n_p, feat_dim), dtype=torch.float32)
+            # No static channels: omit tensor so static_dim=0 and static_proj is not built (true no-feat path).
+            static_node_x = None
 
         node_type: torch.Tensor | None = None
         edge_type: torch.Tensor | None = None

@@ -54,8 +54,9 @@ class RunLogger:
                 "num_negatives",
                 "mrr",
                 "n_queries",
-                "n_skipped_no_pool",
-                "n_skipped_full_catalog",
+                "n_skipped_no_negative_pool",
+                "n_skipped_would_materialize_full_catalog",
+                "n_skipped_invalid_node_ids",
                 "timestamp",
             ],
             row=[
@@ -68,6 +69,7 @@ class RunLogger:
                 metrics.get("n_queries", 0),
                 metrics.get("n_skipped_no_negative_pool", 0),
                 metrics.get("n_skipped_would_materialize_full_catalog", 0),
+                metrics.get("n_skipped_invalid_node_ids", 0),
                 datetime.now().isoformat(),
             ],
         )
@@ -76,7 +78,7 @@ class RunLogger:
     def _append(self, path: Path, headers: list[str], row: list) -> None:
         """Append a row to a CSV, writing headers if the file is new."""
         write_header = not path.exists()
-        with open(path, "a", newline="") as f:
+        with open(path, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             if write_header:
                 writer.writerow(headers)

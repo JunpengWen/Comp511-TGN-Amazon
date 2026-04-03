@@ -64,6 +64,7 @@ class BipartiteProductNegativeHook(StatelessHook):
             neg = torch.where(clash, resampled, neg)
         clash = neg.long() == dst
         if clash.any():
+            # Worst-case O(|product range|) per clashing row if resampling keeps failing; rare in practice.
             for i in torch.where(clash)[0].tolist():
                 di = int(dst[i].item())
                 for cand in range(self.product_lo, self.product_hi):
