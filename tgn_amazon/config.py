@@ -17,6 +17,12 @@ class TrainingConfig:
     time_dim: int = 64
     embedding_dim: int = 64
     seed: int = 42
+    # Early stopping on validation BCE (same protocol as train_epoch; lower is better).
+    # None disables. When set, best weights are restored (train may stop before epochs).
+    early_stop_patience: int | None = None
+    early_stop_min_delta: float = 0.0
+    # Cap val edges for the monitoring pass only (None = full val window).
+    early_stop_val_max_edges: int | None = None
 
 
 @dataclass

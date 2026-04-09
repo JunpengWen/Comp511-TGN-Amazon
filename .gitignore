@@ -9,6 +9,9 @@ venv/
 .mypy_cache/
 *.log
 
+# Trained weights (large)
+checkpoints/
+
 # LaTeX
 *.aux
 *.bbl

@@ -1,0 +1,6 @@
+run_id,label,config,split,num_negatives,mrr,n_queries,n_skipped_no_negative_pool,n_skipped_would_materialize_full_catalog,n_skipped_invalid_node_ids,timestamp
+20260403_213055,TGN+LastAgg,full,val,99,0.414853,560410,0,0,0,2026-04-03T22:19:30.123264
+20260403_222243,TGN+LastAgg,full_static,val,99,0.415874,560410,0,0,0,2026-04-03T23:09:06.913424
+20260408_180239,TGN+LastAgg,full,val,99,0.409594,560410,0,0,0,2026-04-08T18:43:13.295044
+20260408_185223,TGN+LastAgg,full,val,99,0.409594,560410,0,0,0,2026-04-08T19:31:44.932767
+20260409_025140,TGN+LastAgg,full,val,99,0.370905,560410,0,0,0,2026-04-09T14:11:38.631848

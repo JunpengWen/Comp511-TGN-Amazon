@@ -49,6 +49,9 @@ def build_tgn_stack(
         message_module=msg_mod,
         aggregator_module=aggr,
     ).to(dev)
+    # TGNMemory.__init__ built msg_s_store/msg_d_store while still on CPU; .to(dev) does not
+    # relocate those dict tensors. Rebuild empty stores on ``dev`` so eval/train never mix CPU/CUDA.
+    memory._reset_message_store()
 
     gnn_in = memory_dim + static_dim
     static_proj: nn.Module | None = None

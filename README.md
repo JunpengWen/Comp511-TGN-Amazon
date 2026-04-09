@@ -12,16 +12,16 @@ McGill **Network Science** course project (see **`project_proposal.tex`**). Goal
 |------|-------------|
 | **Dependencies** | `requirements.txt` pins `tgm-lib`, `relbench`, PyTorch / PyG, etc. |
 | **RelBench → TGM** | **`tgn_amazon/adapter.py`**: loads `rel-amazon`, train reviews **before** `val_timestamp`; val/test windows use **`review_time >= from_timestamp`** and **`< until_timestamp`** where applicable; **`reuse_node_maps`** for aligned ids; bipartite graph (customers ↔ products) as **`DGData`**. |
-| **Configs** | **`tgn_amazon/config.py`**: **`AblationConfig`** (`static_graph`, `homogeneous`, `use_features`, `use_memory`, `max_review_edges`) and **`TrainingConfig`**. **`use_memory=False`** raises until a no-memory baseline exists. |
+| **Configs** | **`tgn_amazon/config.py`**: **`AblationConfig`** (`static_graph`, `homogeneous`, `use_features`, `use_memory`, `max_review_edges`) and **`TrainingConfig`** (LR, batch, epochs, dims, seed, plus optional **early stopping**: `early_stop_patience`, `early_stop_min_delta`, `early_stop_val_max_edges`). **`use_memory=False`** raises until a no-memory baseline exists. |
 | **Data hooks** | **`tgn_amazon/hooks.py`**: **`BipartiteProductNegativeHook`** — one random **product** negative per edge (optional **`torch.Generator`** for reproducibility). |
 | **TGN model** | **`tgn_amazon/tgn_model.py`**: **`build_tgn_stack`** — **`TGNMemory`**, **`GraphAttentionEmbedding`**, **`LinkPredictor`**, optional static fusion; **LastAggregator** vs **MeanAggregator** (RQ4). |
-| **Training** | **`tgn_amazon/training.py`**: BCE on concatenated pos/neg logits (mean per logit), **`neg != dst`** masked; **`assoc`** sized with **`memory.num_nodes`** (matches global bipartite ids); **`train_epoch`**, **`run_training_job`**, optional **`replay_train_loader_for_memory`**. |
+| **Training** | **`tgn_amazon/training.py`**: BCE on concatenated pos/neg logits (mean per logit), **`neg != dst`** masked; **`assoc`** sized with **`memory.num_nodes`** (matches global bipartite ids); **`train_epoch`**, **`validation_epoch`** (no grad, same BCE for monitoring), **`run_training_job`** (optional **early stopping** on val loss, restores best weights), **`replay_train_loader_for_memory`**. |
 | **Evaluation** | **`tgn_amazon/evaluation.py`**: **MRR** on val/test streams (**`eval_mrr`**, **`run_eval_job`**): random distinct product negatives, memory **`update_state`** per edge; **`_validate_num_negatives_for_eval`**. |
 | **Adapter smoke** | **`scripts/run_adapter_smoke.py`**: builds **`DGraph`**, runs **`DGDataLoader`**, prints stats. |
 | **Invariant checks** | **`scripts/verify_adapter_invariants.py`**: structural checks on bipartite IDs, times, val cutoff, loader batches. |
 | **Training + eval CLI** | **`scripts/train_tgn_baseline.py`**: training then **val** or **test** MRR (`--split`, `--num-negatives`, **`--replay-train-eval`**). Prints a **`run_id`** and appends metrics to CSV (see **Run logging**). |
 | **Training smoke** | **`scripts/run_training_smoke.py`**: small graph, 2 epochs, **LastAggregator** vs **MeanAggregator**. |
-| **Run logging** | **`tgn_amazon/RunLogger.py`**: appends **`logs/training.csv`** (per-epoch **`mean_loss`**) and **`logs/eval.csv`** (**`mrr`**, **`n_queries`**, **`n_skipped_no_negative_pool`**, **`n_skipped_would_materialize_full_catalog`**, **`n_skipped_invalid_node_ids`**). Columns **`run_id`**, **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**), **`config`** (**`AblationConfig.slug()`**) tie rows across files. |
+| **Run logging** | **`tgn_amazon/RunLogger.py`**: appends **`logs/training.csv`** (per-epoch **train** **`mean_loss`** only) and **`logs/eval.csv`** (**`mrr`**, **`n_queries`**, **`n_skipped_no_negative_pool`**, **`n_skipped_would_materialize_full_catalog`**, **`n_skipped_invalid_node_ids`**). Columns **`run_id`**, **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**), **`config`** (**`AblationConfig.slug()`**) tie rows across files. Early-stop **`val_loss`** is printed to the console, not logged to CSV. |
 
 **Course / writing:** `project_proposal.tex` (proposal); follow your course’s deadlines and submission rules separately.
 
@@ -116,9 +116,20 @@ python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1 --split test -
 
 # Replay train stream in no_grad before val MRR (slow; memory warm-up heuristic)
 python scripts/train_tgn_baseline.py --max-edges 50000 --epochs 1 --replay-train-eval
+
+# Save weights after training (default directory checkpoints/; use --no-save-checkpoint to skip)
+python scripts/train_tgn_baseline.py --epochs 3 --checkpoint-dir checkpoints
+
+# Early stopping: val BCE after each epoch; stop if no improvement for N epochs; cap val edges for faster checks
+python scripts/train_tgn_baseline.py --epochs 30 --early-stop-patience 3 --early-stop-val-max-edges 50000
+
+# Eval only from a saved checkpoint (skip training; ablation + hyperparams read from the file)
+python scripts/train_tgn_baseline.py --load-checkpoint checkpoints/20260408_142533_full_lastagg.pt --split val
 ```
 
-Common flags for **`train_tgn_baseline.py`**: `--max-edges`, `--epochs`, `--batch-size`, `--lr`, `--mean-agg`, `--static`, `--homo`, `--no-feat`, **`--split` (`val` / `test`)**, **`--num-negatives`** (on large catalogs must be strictly less than `num_products - 1`; validated in **`run_eval_job`**), **`--replay-train-eval`**.
+Common flags for **`train_tgn_baseline.py`**: `--max-edges`, `--epochs`, `--batch-size`, `--lr`, `--mean-agg`, `--static`, `--homo`, `--no-feat`, **`--split` (`val` / `test`)**, **`--num-negatives`** (on large catalogs must be strictly less than `num_products - 1`; validated in **`run_eval_job`**), **`--replay-train-eval`**, **`--checkpoint-dir`**, **`--no-save-checkpoint`**, **`--load-checkpoint`**, **`--early-stop-patience`**, **`--early-stop-min-delta`**, **`--early-stop-val-max-edges`**.
+
+After training, a **`.pt`** file is written under **`checkpoints/`** (by default) named like **`{run_id}_{AblationConfig.slug()}_{lastagg|meanagg}.pt`**. It holds **`state_dict`s** plus **`AblationConfig`** / **`TrainingConfig`** so **`--load-checkpoint`** can reload and run MRR without retraining. If **early stopping** is enabled, the saved weights are the **best validation-loss snapshot** (lowest monitored val BCE), not necessarily the last training epoch. **`checkpoints/`** is gitignored.
 
 Each CLI run prints **`Run ID: …`** and appends to **`logs/training.csv`** and **`logs/eval.csv`** (created under the project root if missing). Ablations are distinguished in the **`config`** column via **`AblationConfig.slug()`** (for example **`--no-feat`** → **`full_nofeat`** when other ablation flags are off).
 
@@ -137,9 +148,10 @@ Each CLI run prints **`Run ID: …`** and appends to **`logs/training.csv`** and
 | **`tgn_amazon/adapter.py`** | **`RelbenchAmazonAdapter`**: RelBench → **`DGData`**, **`AdapterMetadata`**. |
 | **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`**. |
 | **`tgn_amazon/tgn_model.py`** | **`build_tgn_stack`**. |
-| **`tgn_amazon/training.py`** | **`train_epoch`**, **`run_training_job`**, **`make_train_loader`**, replay helper. |
+| **`tgn_amazon/training.py`** | **`train_epoch`**, **`validation_epoch`**, **`run_training_job`** (optional early stopping), **`make_train_loader`**, replay helper. |
 | **`tgn_amazon/evaluation.py`** | **`eval_mrr`**, **`run_eval_job`**. |
 | **`tgn_amazon/RunLogger.py`** | **`RunLogger`**: CSV metrics for training and eval. |
+| **`tgn_amazon/checkpointing.py`** | Save/load **`.pt`** checkpoints (weights + configs) for **`train_tgn_baseline.py`**. Loading merges missing config keys with current dataclass defaults so older checkpoints stay usable. |
 | **`scripts/run_adapter_smoke.py`** | Smoke-test data loading. |
 | **`scripts/verify_adapter_invariants.py`** | Graph/loader invariants. |
 | **`scripts/run_training_smoke.py`** | Minimal LastAgg vs MeanAgg training. |
@@ -155,6 +167,8 @@ Each CLI run prints **`Run ID: …`** and appends to **`logs/training.csv`** and
 - **Neighborhoods:** **In-batch** edges for **`GraphAttentionEmbedding`** (not full **`LastNeighborLoader`** history).
 - **TGM warnings:** You may see **int64 → int32** downcasting warnings from **`dg_data.py`**; usually harmless at this graph size.
 - **Log CSV schema:** If **`logs/eval.csv`** was written with an older header (fewer columns), archive or delete it before running a newer CLI so appended rows stay aligned with the current column list.
+- **Early stopping:** Monitoring uses **validation BCE** on the RelBench val window (same pos/neg protocol as training). **`--early-stop-val-max-edges`** caps only that monitoring pass; **MRR eval** after training still uses the **full** val/test stream unless you change evaluation code. A capped val proxy can disagree with full-val MRR for choosing the best epoch.
+- **Early stopping cost:** Each training epoch adds a **full forward pass over the (possibly capped) val stream**, so wall-clock per epoch increases versus training alone.
 
 ---
 

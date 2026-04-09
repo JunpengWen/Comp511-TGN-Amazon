@@ -122,7 +122,10 @@ class RelbenchAmazonAdapter:
             time_delta: str = "r"
         else:
             # Unix seconds (TimeDelta 's'). Second bucketing ties many edges on rel-amazon.
+            # Anchor to the earliest edge in *this* split so magnitudes stay moderate for Time2Vec /
+            # relative-time pathways (large raw epoch seconds can hurt optimization; order unchanged).
             ts = review["review_time"].astype("int64") // 10**9
+            ts = ts - ts.min()
             edge_time = torch.tensor(ts.to_numpy(), dtype=torch.long)
             time_delta = "s"
 
