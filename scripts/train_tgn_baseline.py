@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,12 +75,33 @@ def _restore_modules_from_checkpoint(
     return memory, gnn, link_pred, static_proj, abl, tc
 
 
+def _parse_recall_ks(s: str | None) -> list[int] | None:
+    if s is None or not str(s).strip():
+        return None
+    out: list[int] = []
+    for part in str(s).replace(' ', '').split(','):
+        if not part:
+            continue
+        out.append(int(part))
+    return out or None
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description='Train TGN baseline (TGM) on RelBench Amazon')
     p.add_argument('--max-edges', type=int, default=None, help='Cap reviews (default: full train split)')
     p.add_argument('--epochs', type=int, default=1)
     p.add_argument('--batch-size', type=int, default=512)
     p.add_argument('--lr', type=float, default=1e-4)
+    p.add_argument(
+        '--seed',
+        type=int,
+        default=None,
+        metavar='S',
+        help=(
+            'RNG seed for torch / training negatives / early-stop val hook / MRR sampling '
+            '(default when omitted: 42). With --load-checkpoint, overrides the checkpoint seed for eval only.'
+        ),
+    )
     p.add_argument('--mean-agg', action='store_true', help='Use MeanAggregator instead of LastAggregator (RQ4)')
     p.add_argument(
         '--static',
@@ -147,6 +169,26 @@ def main() -> None:
         metavar='M',
         help='Cap val edges for early-stop monitoring only (default: full val split)',
     )
+    p.add_argument(
+        '--recall-ks',
+        type=str,
+        default=None,
+        metavar='K1,K2,...',
+        help=(
+            'Comma-separated K for Recall@K (e.g. 10,50,100). Same random negatives as MRR '
+            '(tie-aware rank). Omit to skip Recall@K.'
+        ),
+    )
+    p.add_argument(
+        '--eval-max-edges',
+        type=int,
+        default=None,
+        metavar='N',
+        help=(
+            'Cap val/test eval stream to the first N edges after filters (faster smoke tests). '
+            'Omit for full split (recommended for reported metrics).'
+        ),
+    )
     args = p.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -158,6 +200,8 @@ def main() -> None:
             sys.exit(1)
         ckpt = load_training_checkpoint_dict(ckpt_path, map_location=device)
         memory, gnn, link_pred, static_proj, abl, tc = _restore_modules_from_checkpoint(ckpt, device)
+        if args.seed is not None:
+            tc = replace(tc, seed=args.seed)
         use_mean = not bool(ckpt['use_last_aggregator'])
         label = 'TGN+MeanAgg' if use_mean else 'TGN+LastAgg'
         logger = RunLogger(log_dir='logs', label=label, config_slug=abl.slug())
@@ -192,6 +236,7 @@ def main() -> None:
             early_stop_patience=args.early_stop_patience,
             early_stop_min_delta=args.early_stop_min_delta,
             early_stop_val_max_edges=args.early_stop_val_max_edges,
+            **({} if args.seed is None else {'seed': args.seed}),
         )
         label = 'TGN+MeanAgg' if args.mean_agg else 'TGN+LastAgg'
         logger = RunLogger(
@@ -236,6 +281,13 @@ def main() -> None:
             )
             print(f'Saved checkpoint: {out_path.resolve()}')
 
+    cached_train_meta = None
+    if not args.replay_train_eval:
+        if args.load_checkpoint:
+            cached_train_meta = train_meta
+        else:
+            cached_train_meta = meta
+
     num_neg = max(1, args.num_negatives)
     run_eval_job(
         adapter,
@@ -250,6 +302,9 @@ def main() -> None:
         label=label,
         replay_train_before_eval=args.replay_train_eval,
         logger=logger,
+        recall_ks=_parse_recall_ks(args.recall_ks),
+        cached_train_meta=cached_train_meta,
+        eval_max_edges=args.eval_max_edges,
     )
 
     print('Done.')

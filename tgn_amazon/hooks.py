@@ -64,14 +64,31 @@ class BipartiteProductNegativeHook(StatelessHook):
             neg = torch.where(clash, resampled, neg)
         clash = neg.long() == dst
         if clash.any():
-            # Worst-case O(|product range|) per clashing row if resampling keeps failing; rare in practice.
+            # Uniform over valid product ids (not deterministic "smallest id") if resampling failed.
+            # O(1) memory: sample an index in [0, num_valid) then map to id (skip dst), same idea as
+            # evaluation._indices_to_product_ids.
+            lo, hi = self.product_lo, self.product_hi
             for i in torch.where(clash)[0].tolist():
                 di = int(dst[i].item())
-                for cand in range(self.product_lo, self.product_hi):
-                    if cand != di:
-                        neg[i] = cand
-                        break
-                # If product_hi - product_lo == 1, the only id equals dst; neg may still clash.
+                in_range = lo <= di < hi
+                pool = hi - lo
+                max_uniq = pool - (1 if in_range else 0)
+                if max_uniq <= 0:
+                    continue
+                u = torch.randint(
+                    0,
+                    max_uniq,
+                    (1,),
+                    device=dg.device,
+                    dtype=torch.long,
+                    generator=gen,
+                ).item()
+                if not in_range:
+                    picked = lo + u
+                else:
+                    off = di - lo
+                    picked = lo + u if u < off else lo + u + 1
+                neg[i] = int(picked)
         batch.neg = neg
         batch.neg_time = batch.edge_time.clone()
         return batch

@@ -163,7 +163,12 @@ def train_epoch(
         total_loss += float(loss.item())
         n_logits += int(logits.numel())
 
-    return total_loss / max(n_logits, 1)
+    if n_logits == 0:
+        raise RuntimeError(
+            'train_epoch: no BCE logits accumulated (empty loader, all batches skipped, '
+            'or every edge had neg == dst). Cannot report a meaningful mean loss.'
+        )
+    return total_loss / n_logits
 
 
 def _snapshot_modules_cpu(
@@ -533,6 +538,7 @@ def run_training_job(
         val_bundle = (val_loader, dg_val, hm_val, val_static)
 
     best_val = float('inf')
+    best_epoch = 0
     best_snap: dict[str, Any] | None = None
     stalled = 0
     stopped_early = False
@@ -573,6 +579,7 @@ def run_training_job(
             print(f'  [{label}] epoch {ep}/{train_cfg.epochs}  val_loss={val_loss:.6f}')
             if val_loss < best_val - train_cfg.early_stop_min_delta:
                 best_val = val_loss
+                best_epoch = ep
                 stalled = 0
                 best_snap = _snapshot_modules_cpu(
                     memory, gnn, link_pred, static_proj
@@ -600,6 +607,13 @@ def run_training_job(
             print(
                 f'  [{label}] restored best weights by val_loss '
                 f'(best_val_loss={best_val:.6f})'
+            )
+        if logger is not None:
+            logger.log_early_stop_summary(
+                best_epoch=best_epoch,
+                best_val_loss=best_val,
+                epochs_completed=len(epoch_losses),
+                stopped_early=stopped_early,
             )
 
     return epoch_losses, memory, gnn, link_pred, static_proj, meta, raw_dim, static_dim

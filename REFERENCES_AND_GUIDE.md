@@ -30,7 +30,7 @@ These inform **motivation and RQs** (ablations, heterogeneity, etc.) but are **n
 
 | Package | Role in this project |
 |---------|----------------------|
-| **`torch`** | Tensors, training loop, autograd. |
+| **`torch`** | Tensors, training loop, autograd. Training/eval select **`cuda`** when **`torch.cuda.is_available()`** else **`cpu`** (no CLI device flag). |
 | **`torch-geometric`** | **`TransformerConv`** (used *inside* TGM’s `GraphAttentionEmbedding`); PyG is a hard dependency of **`tgm-lib`**. |
 | **`tgm-lib`** | TGM: dynamic graph data structures, loader, hooks, TGN modules, link predictor. |
 | **`relbench`** | Load **`rel-amazon`**, access **`Database`**, **`val_timestamp`** / **`test_timestamp`**. |
@@ -81,15 +81,15 @@ Roughly in **data → batch → model** order:
 | RelBench → TGM | **`tgn_amazon/adapter.py`** | Loads **`rel-amazon`**, optional **`max_review_edges`** on train builds, **`review_time < until_timestamp`** for train, **`review_time >= from_timestamp`** for val/test starts, **`reuse_node_maps`** for consistent ids; bipartite **`[0, n_c)`** / **`[n_c, n_c+n_p)`**; **`build_dgdata`** raises if **`use_memory=False`** (guard only). |
 | Ablations (data) | **`tgn_amazon/config.py`** **`AblationConfig`** | **`static_graph`**, **`homogeneous`**, **`use_features`**, **`max_review_edges`**, **`use_memory`** (slug + guard). |
 | Training hyperparameters | **`tgn_amazon/config.py`** **`TrainingConfig`** | **`learning_rate`**, **`batch_size`**, **`epochs`**, **`memory_dim`**, **`time_dim`**, **`embedding_dim`**, **`seed`**, plus optional **early stopping**: **`early_stop_patience`** (None = off), **`early_stop_min_delta`**, **`early_stop_val_max_edges`** (cap val edges for monitoring only). |
-| Bipartite negatives | **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`**: random product negatives; optional **`torch.Generator`**. |
+| Bipartite negatives | **`tgn_amazon/hooks.py`** | **`BipartiteProductNegativeHook`**: random product negatives; optional **`torch.Generator`**. If resampling still clashes with **`dst`**, fallback picks a **uniform** valid product id (index sample; **O(1)** memory). |
 | Model assembly | **`tgn_amazon/tgn_model.py`** | **`build_tgn_stack`**: static fusion **`nn.Linear`** when features are on. |
-| Training | **`tgn_amazon/training.py`** | **`train_epoch`**: BCE sum over valid pos/neg logits, mean for reporting; **`assoc`** length **`memory.num_nodes`**; **`validation_epoch`**: same BCE in **`no_grad`** over the val window for early-stop monitoring; **`run_training_job`**: optional early stopping (best val loss → CPU snapshot → restore before return; may stop before **`epochs`**); **`replay_train_loader_for_memory`** (optional eval warm-up). |
-| Evaluation | **`tgn_amazon/evaluation.py`** | **`eval_mrr`**: **MRR** with **`K`** random distinct product negatives; **`run_eval_job`**: uncapped eval graph, **`_validate_num_negatives_for_eval`**, optional replay; metrics include skip counts; optional **`RunLogger`** after MRR. |
-| Run logging | **`tgn_amazon/RunLogger.py`** | **`RunLogger`**: append-only CSV under **`log_dir`** (default **`logs/`**). Shared **`run_id`** per process run; **`label`** (**`TGN+LastAgg`** / **`TGN+MeanAgg`**); **`config`** = **`AblationConfig.slug()`** (distinguishes **`--no-feat`** as **`full_nofeat`**, **`--static`** / **`--homo`** as extra suffixes, etc.). |
-| CLI | **`scripts/train_tgn_baseline.py`** | Training + MRR: **`--split`**, **`--num-negatives`**, **`--replay-train-eval`**, ablation flags; **`--early-stop-patience`**, **`--early-stop-min-delta`**, **`--early-stop-val-max-edges`**; prints **`run_id`**, wires **`logger`** into **`run_training_job`** / **`run_eval_job`**. |
+| Training | **`tgn_amazon/training.py`** | **`train_epoch`**: BCE sum over valid pos/neg logits, mean for reporting; raises if **no logits** accumulated in an epoch; **`assoc`** length **`memory.num_nodes`**; **`validation_epoch`**: same BCE in **`no_grad`** over the val window for early-stop monitoring; **`run_training_job`**: optional early stopping (best val loss → CPU snapshot → restore; **`RunLogger.log_early_stop_summary`**); **`replay_train_loader_for_memory`** (optional eval warm-up). |
+| Evaluation | **`tgn_amazon/evaluation.py`** | **`_eval_ranking_metrics`**: one pass for **MRR** and optional **Recall@K** (tie-aware rank, same 1-pos + random-negs pool). **`run_eval_job`**: **`recall_ks`**, **`cached_train_meta`** (skip second train **`build_dgdata`** when no replay), **`eval_max_edges`** (cap val/test eval stream; **`None`** = full split). **`eval_mrr`**, **`eval_recall_at_k`**; **`_validate_num_negatives_for_eval`**, optional replay; **`RunLogger`** + **`recalls_json`**. |
+| Run logging | **`tgn_amazon/RunLogger.py`** | Append-only CSVs under **`logs/`** (directory **gitignored** in this repo). **`_append`** warns if existing file header **column count** ≠ current schema. **`log_early_stop_summary`** → **`early_stop.csv`**; **`log_eval`** + **`recalls_json`** when Recall@K runs. |
+| CLI | **`scripts/train_tgn_baseline.py`** | Training + MRR: **`--split`**, **`--num-negatives`**, **`--recall-ks`**, **`--eval-max-edges`**, **`--replay-train-eval`**, ablation flags; **`--early-stop-*`**, **`--seed`**; **`--load-checkpoint`** / **`--checkpoint-dir`**; passes **`cached_train_meta`** into **`run_eval_job`** when not replaying (avoids duplicate train build). |
 | Smoke / invariants | **`scripts/run_adapter_smoke.py`**, **`run_training_smoke.py`**, **`verify_adapter_invariants.py`** | As in **`README.md`**. |
 | Package exports | **`tgn_amazon/__init__.py`** | **`AblationConfig`**, **`TrainingConfig`**, **`RelbenchAmazonAdapter`**. |
-| Checkpoints | **`tgn_amazon/checkpointing.py`** | **`save_training_checkpoint`** / **`load_training_checkpoint_dict`**; **`configs_from_checkpoint`** merges saved dicts with current dataclass field defaults so older **`.pt`** files load after new **`TrainingConfig`** / **`AblationConfig`** fields are added. |
+| Checkpoints | **`tgn_amazon/checkpointing.py`** | **`save_training_checkpoint`** / **`load_training_checkpoint_dict`** (**`weights_only=False`**: load **trusted** files only). **`configs_from_checkpoint`** merges saved dicts with current dataclass defaults. Checkpoints do **not** embed id maps; eval still needs RelBench + **`build_dgdata`**. |
 
 **RQ4-style comparison** is **`LastAggregator`** vs **`MeanAggregator`** inside **`TGNMemory`** (CLI **`--mean-agg`**). A true “no memory” baseline is **not** implemented; **`use_memory=False`** fails fast in **`build_dgdata`**.
 
@@ -98,7 +98,8 @@ Roughly in **data → batch → model** order:
 | File | Columns (high level) |
 |------|----------------------|
 | **`logs/training.csv`** | **`run_id`**, **`label`**, **`config`**, **`epoch`**, **`mean_loss`** (train only), **`timestamp`** — one row per completed training epoch. Early-stop **`val_loss`** is not a column (printed in the console only). |
-| **`logs/eval.csv`** | **`run_id`**, **`label`**, **`config`**, **`split`**, **`num_negatives`**, **`mrr`** (6 decimal places), **`n_queries`**, **`n_skipped_no_negative_pool`**, **`n_skipped_would_materialize_full_catalog`**, **`n_skipped_invalid_node_ids`**, **`timestamp`** — one row per **`run_eval_job`** call. |
+| **`logs/eval.csv`** | **`run_id`**, **`label`**, **`config`**, **`split`**, **`num_negatives`**, **`mrr`**, **`n_queries`**, skip counts, **`recalls_json`** (JSON string **`{"10": 0.35, ...}`** when **`--recall-ks`** is used; else empty), **`timestamp`** — one row per **`run_eval_job`** call. |
+| **`logs/early_stop.csv`** | **`run_id`**, **`label`**, **`config`**, **`best_epoch`**, **`best_val_loss`**, **`epochs_completed`**, **`stopped_early`**, **`timestamp`** — one row per training run that used early stopping. |
 
 **`scripts/run_training_smoke.py`** does not instantiate **`RunLogger`**; use **`train_tgn_baseline.py`** (or pass a logger from your own script) for CSV logs.
 
@@ -133,9 +134,10 @@ TGM attaches **hooks** to the dataloader so each **`DGBatch`** can be augmented 
 
 ## 8. Evaluation (MRR) (high level)
 
-1. **`run_eval_job`** builds eval **`DGData`** with **`max_review_edges=None`** (full val/test stream), **`reuse_node_maps`** from train, and validates **`num_negatives`** vs catalog size when needed.
-2. **`eval_mrr`** iterates edges, samples negatives (small pool: **`torch.randperm`**; large pool: **NumPy `choice`**, mixed RNG with **`torch.Generator`**-derived seed), ranks **1 + K** candidates, tie-aware rank, **`memory.update_state`** per edge; does not reset memory at entry unless you use replay outside this flow.
-3. **`_set_tgn_memory_eval_mode`** avoids **`TGNMemory.eval()`** OOM on large graphs.
+1. **`run_eval_job`** builds eval **`DGData`** with **`reuse_node_maps`** from train. **`eval_max_edges`** (CLI **`--eval-max-edges`**) sets **`AblationConfig.max_review_edges`** for the **eval** build only (first *N* edges after time filters); **`None`** keeps the **full** val/test stream. It validates **`num_negatives`** vs catalog size when needed. With **`cached_train_meta`** and no replay, it can **skip** rebuilding the train graph (see **`README.md`** limitations).
+2. **`_eval_ranking_metrics`** (used by **`eval_mrr`** and **`run_eval_job`**) iterates edges, samples negatives (small pool: **`torch.randperm`**; large pool: **NumPy `choice`**, mixed RNG with **`torch.Generator`**-derived seed), scores **1 positive + sampled negatives** (true item first in the candidate list), and computes **tie-aware average rank** (same rule for MRR and Recall@K). **Recall@K** is the fraction of queries with **`avg_rank <= K`**; it is **not** full-catalog retrieval—only the sampled negatives define the competition set. If **`K ≥`** number of candidates (**`1 + num_negatives`**), **Recall@K** is **1.0** for all non-skipped queries (vacuous). **`memory.update_state`** runs per edge; memory is not reset at entry unless you use replay outside this flow.
+3. **`eval_recall_at_k`** is a thin wrapper for scripts/notebooks that only need Recall@K (and optionally **`mrr`** in the same pass).
+4. **`_set_tgn_memory_eval_mode`** avoids **`TGNMemory.eval()`** OOM on large graphs.
 
 ---
 
@@ -143,18 +145,19 @@ TGM attaches **hooks** to the dataloader so each **`DGBatch`** can be augmented 
 
 - **Single relation stream:** **reviews** only → bipartite **customer–product** edges (not every table/relation in the proposal narrative).
 - **Neighborhoods:** **In-batch** edges for **`GraphAttentionEmbedding`**, not PyG’s **`LastNeighborLoader`** over full history.
-- **Evaluation:** **MRR** with random product negatives on time splits; **not** RelBench task leaderboard wiring or **Recall@K** / **MAP@K** in-repo.
+- **Evaluation:** **MRR** and optional **Recall@K** on the same random negative sample as MRR; **not** RelBench task leaderboard wiring, full-catalog **Recall@K**, or **MAP@K** in-repo.
 - **Negatives:** Random product ids for train and eval (not hard negatives, not TGB’s precomputed eval sets).
 - **TGM:** **`UserWarning`** about **int64 → int32** downcasting in **`dg_data.py`** is common; ids here are below int32 range.
-- **Early stopping vs MRR:** The monitored metric is **val BCE** (optionally on a **capped** val prefix). **`run_eval_job`** / **`eval_mrr`** still evaluate **MRR** on the **full** val or test stream by default; the best epoch for BCE is not guaranteed to maximize MRR.
+- **Early stopping vs MRR:** The monitored metric is **val BCE** (optionally on a **capped** val prefix). **MRR / Recall@K** use the **full** eval stream by default; **`--eval-max-edges`** caps that stream for smoke tests. The best epoch for BCE is not guaranteed to maximize MRR.
+- **GPU:** Same **`torch.cuda.is_available()`** rule as training; install a **CUDA** PyTorch wheel and working NVIDIA drivers for GPU runs.
 
 ---
 
 ## 10. Future work (planned)
 
-1. **More metrics / RelBench tasks** — **Recall@K**, **MAP@K**, or official **RelBench** task evaluation if required for comparison.
+1. **More metrics / RelBench tasks** — **MAP@K**, full-catalog retrieval **Recall@K**, or official **RelBench** task evaluation if required for comparison.
 2. **Ablations at scale** — Sweep **`AblationConfig`** × **`TrainingConfig`** after one validation tuning pass.
-3. **Optional** — Plots or aggregation from **`logs/*.csv`**; append **`val_loss`** (and early-stop metadata) to **`logs/training.csv`** if you want spreadsheet parity with the console; serialized **`TrainingConfig`** per row if you need exact hyperparameters in the sheet; stronger neighbor sampling (closer to PyG **`LastNeighborLoader`**); a real **no-memory** baseline if **`use_memory`** is implemented.
+3. **Optional** — Plots or aggregation from **`logs/*.csv`**; append **`val_loss`** per epoch to **`training.csv`** if you want full spreadsheet parity with the console ( **`early_stop.csv`** already logs best epoch / best val); serialized **`TrainingConfig`** per eval row; stronger neighbor sampling (closer to PyG **`LastNeighborLoader`**); a real **no-memory** baseline if **`use_memory`** is implemented; explicit **`--device`** / **`--cpu`** CLI flags.
 4. **Reports** — Per your course’s requirements.
 
 ---

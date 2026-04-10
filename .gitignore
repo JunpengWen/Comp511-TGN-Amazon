@@ -9,6 +9,9 @@ venv/
 .mypy_cache/
 *.log
 
+# Run outputs (local experiments; schema changes often)
+logs/
+
 # Trained weights (large)
 checkpoints/
 

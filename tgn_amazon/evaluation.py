@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
-from typing import Any, Dict
+from typing import Any, Dict, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -85,7 +85,8 @@ def _sample_negatives_one(
     Large ``k_eff`` makes ``numpy.choice(..., replace=False)`` costly — keep
     ``num_negatives`` modest unless you accept slower eval.
     RNG: one ``torch.randint`` advances ``gen``, then ``numpy.random.Generator``
-    draws the negative set (not a single pure-PyTorch stream).
+    draws the negative set (not a single pure-PyTorch stream). Exact reproducibility
+    across PyTorch/NumPy versions is therefore not guaranteed from ``seed`` alone.
     """
     pool = hi - lo
     if pool <= 0:
@@ -157,7 +158,7 @@ def _restore_all_train_mode(
         static_proj.train()
 
 
-def eval_mrr(
+def _eval_ranking_metrics(
     memory: TGNMemory,
     gnn: GraphAttentionEmbedding,
     link_pred: LinkPredictor,
@@ -170,21 +171,13 @@ def eval_mrr(
     num_negatives: int,
     seed: int = 0,
     assoc_buf: torch.Tensor | None = None,
+    *,
+    recall_ks: Tuple[int, ...] = (),
 ) -> Dict[str, Any]:
-    """MRR with 1 positive + up to ``num_negatives`` distinct random product negatives.
+    """MRR and optional Recall@K on the same 1-pos + random-negs pool as ``eval_mrr``.
 
-    When the product pool cannot supply ``k`` distinct negatives != ``dst``, fewer
-    negatives are used (no padding with duplicates). Edges with no valid negative
-    at     all are skipped for MRR but still advance ``update_state`` so memory stays
-    aligned with the stream.
-    Skips are counted in ``n_skipped_no_negative_pool``;
-    ``n_skipped_would_materialize_full_catalog`` counts large-pool queries that
-    would require sampling every distinct negative (defensive; ``run_eval_job``
-    validates ``num_negatives`` upfront).
-    ``n_skipped_invalid_node_ids`` counts rows where ``src``, ``dst``, or a negative
-    is out of range for ``train_meta.num_nodes`` (should be zero on clean data).
-
-    Does **not** reset memory at entry: starts from post-training or post-replay state.
+    Tie-aware rank matches ``eval_mrr`` (average rank among score ties). Recall@K is
+    1 when ``avg_rank <= K``, else 0, averaged over scored queries.
     """
     _set_tgn_memory_eval_mode(memory)
     gnn.eval()
@@ -207,6 +200,7 @@ def eval_mrr(
     n_skipped_no_pool = 0
     n_skipped_would_materialize_full_catalog = 0
     n_skipped_invalid_node_ids = 0
+    recall_hits: Dict[int, int] = {kk: 0 for kk in recall_ks}
 
     if assoc_buf is None:
         assoc_buf = torch.empty(num_nodes, dtype=torch.long, device=device)
@@ -233,9 +227,6 @@ def eval_mrr(
                         'eval_mrr: batch contains src or dst outside [0, num_nodes). '
                         f'num_nodes={num_nodes}. Transductive maps or adapter metadata may be inconsistent.'
                     )
-
-            if src.numel() == 0:
-                continue
 
             if batch.edge_x is not None:
                 edge_x = batch.edge_x.float()
@@ -284,7 +275,6 @@ def eval_mrr(
                 n_id = torch.cat([src[i : i + 1], cand], dim=0).unique()
                 assoc_buf[n_id] = torch.arange(n_id.size(0), device=device)
 
-                # One src→candidate edge per candidate so TransformerConv treats dst and negs alike.
                 num_c = cand.size(0)
                 s_loc = assoc_buf[src[i]]
                 edge_index = torch.stack(
@@ -318,6 +308,9 @@ def eval_mrr(
                 avg_rank = 1.0 + better + (tie - 1) / 2.0
                 sum_rr += 1.0 / avg_rank
                 n_queries += 1
+                for kk in recall_ks:
+                    if avg_rank <= kk:
+                        recall_hits[kk] += 1
 
                 memory.detach()
                 memory.update_state(
@@ -327,22 +320,139 @@ def eval_mrr(
                     raw_msg_i,
                 )
 
-    if n_queries == 0:
-        return {
-            "mrr": 0.0,
-            "n_queries": 0,
-            "n_skipped_no_negative_pool": n_skipped_no_pool,
-            "n_skipped_would_materialize_full_catalog": n_skipped_would_materialize_full_catalog,
-            "n_skipped_invalid_node_ids": n_skipped_invalid_node_ids,
-        }
-
-    return {
-        "mrr": sum_rr / n_queries,
+    base: Dict[str, Any] = {
         "n_queries": n_queries,
         "n_skipped_no_negative_pool": n_skipped_no_pool,
         "n_skipped_would_materialize_full_catalog": n_skipped_would_materialize_full_catalog,
         "n_skipped_invalid_node_ids": n_skipped_invalid_node_ids,
     }
+    for kk in recall_ks:
+        base[f"recall_at_{kk}"] = (
+            (recall_hits[kk] / n_queries) if n_queries > 0 else 0.0
+        )
+
+    if n_queries == 0:
+        base["mrr"] = 0.0
+        return base
+
+    base["mrr"] = sum_rr / n_queries
+    return base
+
+
+def eval_mrr(
+    memory: TGNMemory,
+    gnn: GraphAttentionEmbedding,
+    link_pred: LinkPredictor,
+    static_proj: nn.Module | None,
+    loader: DGDataLoader,
+    device: torch.device,
+    static_node_x: torch.Tensor | None,
+    raw_msg_dim: int,
+    train_meta: AdapterMetadata,
+    num_negatives: int,
+    seed: int = 0,
+    assoc_buf: torch.Tensor | None = None,
+) -> Dict[str, Any]:
+    """MRR with 1 positive + up to ``num_negatives`` distinct random product negatives.
+
+    When the product pool cannot supply ``k`` distinct negatives != ``dst``, fewer
+    negatives are used (no padding with duplicates). Edges with no valid negative
+    at all are skipped for MRR but still advance ``update_state`` so memory stays
+    aligned with the stream.
+    Skips are counted in ``n_skipped_no_negative_pool``;
+    ``n_skipped_would_materialize_full_catalog`` counts large-pool queries that
+    would require sampling every distinct negative (defensive; ``run_eval_job``
+    validates ``num_negatives`` upfront).
+    ``n_skipped_invalid_node_ids`` counts rows where ``src``, ``dst``, or a negative
+    is out of range for ``train_meta.num_nodes`` (should be zero on clean data).
+
+    Does **not** reset memory at entry: starts from post-training or post-replay state.
+    """
+    r = _eval_ranking_metrics(
+        memory,
+        gnn,
+        link_pred,
+        static_proj,
+        loader,
+        device,
+        static_node_x,
+        raw_msg_dim,
+        train_meta,
+        num_negatives,
+        seed=seed,
+        assoc_buf=assoc_buf,
+        recall_ks=(),
+    )
+    return {
+        "mrr": r["mrr"],
+        "n_queries": r["n_queries"],
+        "n_skipped_no_negative_pool": r["n_skipped_no_negative_pool"],
+        "n_skipped_would_materialize_full_catalog": r[
+            "n_skipped_would_materialize_full_catalog"
+        ],
+        "n_skipped_invalid_node_ids": r["n_skipped_invalid_node_ids"],
+    }
+
+
+def eval_recall_at_k(
+    memory: TGNMemory,
+    gnn: GraphAttentionEmbedding,
+    link_pred: LinkPredictor,
+    static_proj: nn.Module | None,
+    loader: DGDataLoader,
+    device: torch.device,
+    static_node_x: torch.Tensor | None,
+    raw_msg_dim: int,
+    train_meta: AdapterMetadata,
+    num_negatives: int,
+    ks: Sequence[int],
+    seed: int = 0,
+    assoc_buf: torch.Tensor | None = None,
+    *,
+    include_mrr: bool = True,
+) -> Dict[str, Any]:
+    """Recall@K for each K in ``ks``, same candidate protocol as ``eval_mrr``.
+
+    For each query, the true product is ranked among ``1 + num_sampled_negatives``
+    candidates using link scores; ties use the same average-rank rule as MRR.
+    Recall@K is the fraction of queries with ``avg_rank <= K``.
+
+    Returns keys ``recall_at_{K}`` for each K, skip counts, ``n_queries``, and
+    optionally ``mrr`` (if ``include_mrr``).
+    """
+    ks_t = tuple(sorted({int(x) for x in ks}))
+    if not ks_t:
+        raise ValueError("ks must be non-empty")
+    if any(x < 1 for x in ks_t):
+        raise ValueError("all K must be >= 1")
+    r = _eval_ranking_metrics(
+        memory,
+        gnn,
+        link_pred,
+        static_proj,
+        loader,
+        device,
+        static_node_x,
+        raw_msg_dim,
+        train_meta,
+        num_negatives,
+        seed=seed,
+        assoc_buf=assoc_buf,
+        recall_ks=ks_t,
+    )
+    out: Dict[str, Any] = {
+        "n_queries": r["n_queries"],
+        "n_skipped_no_negative_pool": r["n_skipped_no_negative_pool"],
+        "n_skipped_would_materialize_full_catalog": r[
+            "n_skipped_would_materialize_full_catalog"
+        ],
+        "n_skipped_invalid_node_ids": r["n_skipped_invalid_node_ids"],
+    }
+    for kk in ks_t:
+        out[f"recall_at_{kk}"] = r[f"recall_at_{kk}"]
+    if include_mrr:
+        out["mrr"] = r["mrr"]
+    return out
 
 
 def run_eval_job(
@@ -359,20 +469,48 @@ def run_eval_job(
     logger: RunLogger | None = None,
     *,
     replay_train_before_eval: bool = False,
+    recall_ks: Sequence[int] | None = None,
+    cached_train_meta: AdapterMetadata | None = None,
+    eval_max_edges: int | None = None,
 ) -> Dict[str, Any]:
+    """Evaluate MRR on ``split``; optional ``recall_ks`` adds Recall@K in one pass (same protocol).
+
+    ``eval_max_edges`` caps the val/test stream (first N edges after time filters) for faster
+    smoke tests; ``None`` uses the full split (recommended for reported results).
+
+    If ``cached_train_meta`` is set and ``replay_train_before_eval`` is False, skips rebuilding
+    the train split (saves a full ``build_dgdata`` on large graphs). Caller must pass metadata
+    from the same ``AblationConfig`` / adapter state as the model. When replay is True, the train
+    graph is always built so the replay stream exists.
+    """
     torch.manual_seed(train_cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dg_train_data, train_meta = adapter.build_dgdata(
-        abl_cfg, until_timestamp=adapter.dataset.val_timestamp
-    )
+    dg_train_data = None
+    if cached_train_meta is not None and not replay_train_before_eval:
+        train_meta = cached_train_meta
+    else:
+        dg_train_data, train_meta = adapter.build_dgdata(
+            abl_cfg, until_timestamp=adapter.dataset.val_timestamp
+        )
+        if cached_train_meta is not None:
+            if (
+                train_meta.num_nodes != cached_train_meta.num_nodes
+                or train_meta.num_customers != cached_train_meta.num_customers
+                or train_meta.num_products != cached_train_meta.num_products
+            ):
+                raise ValueError(
+                    'cached_train_meta does not match rebuilt train graph '
+                    f'(nodes {train_meta.num_nodes} vs {cached_train_meta.num_nodes}, etc.).'
+                )
     _validate_num_negatives_for_eval(num_negatives, train_meta)
 
     dg_train: DGraph | None = None
     if replay_train_before_eval:
+        assert dg_train_data is not None
         dg_train = DGraph(dg_train_data, device=device)
 
-    abl_eval = replace(abl_cfg, max_review_edges=None)
+    abl_eval = replace(abl_cfg, max_review_edges=eval_max_edges)
 
     if split == "val":
         dg_eval_data, eval_meta = adapter.build_dgdata(
@@ -400,10 +538,14 @@ def run_eval_job(
 
     memory_snapshot = copy.deepcopy(memory.state_dict())
 
+    cap_note = (
+        f"cap={eval_max_edges} train-style edges"
+        if eval_max_edges is not None
+        else "full split (uncapped)"
+    )
     print(
         f"  [{label}] evaluating on {split} split "
-        f"({eval_meta.num_edges} edges, {num_negatives} negatives/query; "
-        f"eval data uncapped by max_review_edges)"
+        f"({eval_meta.num_edges} edges, {num_negatives} negatives/query; {cap_note})"
     )
     if replay_train_before_eval:
         hm_train = HookManager(keys=['train'])
@@ -439,26 +581,46 @@ def run_eval_job(
 
     assoc_buf = torch.empty(train_meta.num_nodes, dtype=torch.long, device=device)
 
-    metrics = eval_mrr(
-        memory=memory,
-        gnn=gnn,
-        link_pred=link_pred,
-        static_proj=static_proj,
-        loader=eval_loader,
-        device=device,
-        static_node_x=static_node_x,
-        raw_msg_dim=raw_dim,
-        train_meta=train_meta,
-        num_negatives=num_negatives,
+    recall_ks_t: Tuple[int, ...] = tuple(sorted(set(recall_ks))) if recall_ks else ()
+    metrics = _eval_ranking_metrics(
+        memory,
+        gnn,
+        link_pred,
+        static_proj,
+        eval_loader,
+        device,
+        static_node_x,
+        raw_dim,
+        train_meta,
+        num_negatives,
         seed=train_cfg.seed,
         assoc_buf=assoc_buf,
+        recall_ks=recall_ks_t,
     )
-    
+    # Stable public shape for MRR-only consumers: duplicate keys without recall_at_*.
+    if not recall_ks_t:
+        metrics = {
+            "mrr": metrics["mrr"],
+            "n_queries": metrics["n_queries"],
+            "n_skipped_no_negative_pool": metrics["n_skipped_no_negative_pool"],
+            "n_skipped_would_materialize_full_catalog": metrics[
+                "n_skipped_would_materialize_full_catalog"
+            ],
+            "n_skipped_invalid_node_ids": metrics["n_skipped_invalid_node_ids"],
+        }
+
+    recalls_for_log: Dict[int, float] | None = None
+    if recall_ks_t:
+        recalls_for_log = {
+            kk: float(metrics[f"recall_at_{kk}"]) for kk in recall_ks_t
+        }
+
     if logger is not None:
         logger.log_eval(
             split=split,
             metrics=metrics,
             num_negatives=num_negatives,
+            recalls=recalls_for_log,
         )
 
     memory.load_state_dict(memory_snapshot)
@@ -468,6 +630,12 @@ def run_eval_job(
     skipped_full = int(metrics.get("n_skipped_would_materialize_full_catalog", 0))
     skipped_oob = int(metrics.get("n_skipped_invalid_node_ids", 0))
     nq = int(metrics.get("n_queries", 0))
+    r_str = ""
+    if recall_ks_t:
+        r_str = "  " + " ".join(
+            f"R@{kk}={metrics[f'recall_at_{kk}']:.4f}" for kk in recall_ks_t
+        )
+
     if skipped or skipped_full or skipped_oob:
         extra = []
         if skipped:
@@ -477,10 +645,12 @@ def run_eval_job(
         if skipped_oob:
             extra.append(f"{skipped_oob} invalid-node-id")
         print(
-            f"  [{label}] {split}  MRR={metrics['mrr']:.4f}  "
+            f"  [{label}] {split}  MRR={metrics['mrr']:.4f}{r_str}  "
             f"(MRR queries={nq}, skipped: {', '.join(extra)})"
         )
     else:
-        print(f"  [{label}] {split}  MRR={metrics['mrr']:.4f}  (MRR queries={nq})")
+        print(
+            f"  [{label}] {split}  MRR={metrics['mrr']:.4f}{r_str}  (MRR queries={nq})"
+        )
 
     return metrics

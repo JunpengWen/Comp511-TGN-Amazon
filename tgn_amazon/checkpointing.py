@@ -48,7 +48,12 @@ def save_training_checkpoint(
 
 
 def load_training_checkpoint_dict(path: str | Path, map_location: str | torch.device) -> dict[str, Any]:
-    """Load checkpoint dict (pickled payload; not weights-only)."""
+    """Load checkpoint dict (pickled payload; not weights-only).
+
+    Uses ``weights_only=False`` so the file can hold nested dicts/configs. Only load
+    checkpoints from trusted sources; untrusted ``.pt`` files can execute arbitrary
+    code during unpickling.
+    """
     try:
         return torch.load(path, map_location=map_location, weights_only=False)
     except TypeError:
