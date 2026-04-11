@@ -1,0 +1,2 @@
+run_id,label,config,split,num_negatives,mrr,n_queries,n_skipped_no_negative_pool,n_skipped_would_materialize_full_catalog,n_skipped_invalid_node_ids,recalls_json,timestamp
+20260410_035046,TGN+LastAgg,full,val,99,0.370550,560410,0,0,0,"{""10"": 0.650754, ""50"": 0.855147, ""100"": 1.0}",2026-04-10T04:04:09.099490
