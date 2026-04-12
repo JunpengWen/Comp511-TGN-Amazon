@@ -87,6 +87,187 @@ def plot_training_loss(df: pd.DataFrame, out: Path | None) -> None:
     _save_or_show(fig, out, "01_training_loss.png")
 
 
+def plot_metrics_summary(df: pd.DataFrame, out: Path | None) -> None:
+    """
+    Horizontal bar chart of MRR + Recall@K for every (run_id, split) row.
+    Works with 1 row or many.
+    """
+    df, ks = _parse_recalls(df)
+    recall_cols = [f"recall@{k}" for k in ks]
+    metric_cols = ["mrr"] + recall_cols
+    metric_labels = ["MRR"] + [f"Recall@{k}" for k in ks]
+
+    for _, row in df.iterrows():
+        values = [row[c] for c in metric_cols]
+        run_label = f"{row['run_id']}  |  split={row['split']}  |  neg={row['num_negatives']}"
+
+        fig, ax = plt.subplots(figsize=(8, max(3, len(metric_cols) * 0.55 + 1.5)))
+        fig.suptitle("Eval Metrics Summary", color="#e8eaf0", fontsize=15, y=1.01)
+
+        bars = ax.barh(metric_labels, values,
+                       color=[_color(i) for i in range(len(metric_cols))],
+                       alpha=0.85, height=0.55)
+
+        for bar, val in zip(bars, values):
+            if not np.isnan(val):
+                ax.text(max(val - 0.03, 0.01), bar.get_y() + bar.get_height() / 2,
+                        f"{val:.4f}", va="center", ha="right",
+                        color="#0f1117", fontsize=9, fontweight="bold")
+
+        ax.set_xlim(0, 1.05)
+        ax.set_xlabel("Score")
+        ax.set_title(run_label, color="#7a7d8d", fontsize=9, pad=6)
+        ax.invert_yaxis()
+
+        safe = row["run_id"].replace(":", "-").replace("/", "-")
+        _save_or_show(fig, out, f"02_metrics_summary_{safe}_{row['split']}.png")
+
+
+def plot_recall_at_k(df: pd.DataFrame, out: Path | None) -> None:
+    """
+    Recall@K line chart per (run_id, split).
+    Works with 1 row — shows how recall accumulates as K grows.
+    """
+    df, ks = _parse_recalls(df)
+    if not ks:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig.suptitle("Recall@K", color="#e8eaf0", fontsize=15, y=1.01)
+
+    for i, (_, row) in enumerate(df.iterrows()):
+        vals = [row[f"recall@{k}"] for k in ks]
+        if all(np.isnan(v) for v in vals):
+            continue
+        label = f"{row['run_id']} / {row['split']}"
+        ax.plot(ks, vals, color=_color(i), marker="o", markersize=6, label=label)
+        for k, v in zip(ks, vals):
+            if not np.isnan(v):
+                ax.annotate(f"{v:.3f}", (k, v),
+                            textcoords="offset points", xytext=(0, 8),
+                            ha="center", fontsize=8, color=_color(i))
+
+    ax.set_xlabel("K")
+    ax.set_ylabel("Recall@K")
+    ax.set_ylim(0, 1.12)
+    ax.set_xticks(ks)
+    ax.legend(loc="lower right")
+    _save_or_show(fig, out, "03_recall_at_k.png")
+
+
+def plot_mrr_vs_recall_tradeoff(df: pd.DataFrame, out: Path | None) -> None:
+    """
+    Scatter: MRR (x) vs each Recall@K (y).
+    With 1 row shows where each K threshold lands relative to MRR.
+    """
+    df, ks = _parse_recalls(df)
+    if not ks:
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    fig.suptitle("MRR vs Recall@K", color="#e8eaf0", fontsize=15, y=1.01)
+
+    for i, k in enumerate(ks):
+        col = f"recall@{k}"
+        sub = df[df[col].notna()]
+        ax.scatter(sub["mrr"], sub[col], color=_color(i),
+                   label=f"Recall@{k}", s=80, zorder=3,
+                   edgecolors="#0f1117", linewidths=0.5)
+        # Annotate each point with run label
+        for _, row in sub.iterrows():
+            ax.annotate(f"{row['split']}", (row["mrr"], row[col]),
+                        textcoords="offset points", xytext=(5, 3),
+                        fontsize=7, color=_color(i))
+
+    ax.plot([0, 1], [0, 1], color="#3a3d4d", linewidth=1,
+            linestyle="--", label="MRR = Recall")
+    ax.set_xlabel("MRR")
+    ax.set_ylabel("Recall@K")
+    ax.set_xlim(0, 1.05)
+    ax.set_ylim(0, 1.08)
+    ax.legend()
+    _save_or_show(fig, out, "04_mrr_vs_recall.png")
+
+
+def plot_query_coverage(df: pd.DataFrame, out: Path | None) -> None:
+    """
+    Stacked bar: evaluated vs each skip reason — one bar per (run_id, split).
+    Works with 1 row.
+    """
+    skip_cols = [
+        "n_skipped_no_negative_pool",
+        "n_skipped_would_materialize_full_catalog",
+        "n_skipped_invalid_node_ids",
+    ]
+    skip_labels = ["No neg pool", "Full catalog", "Invalid IDs"]
+    skip_colors = [_color(2), _color(3), _color(4)]
+
+    df = df.copy()
+    df["n_evaluated"] = (df["n_queries"] - df[skip_cols].sum(axis=1)).clip(lower=0)
+    df["row_label"] = df["run_id"] + "\n" + df["split"]
+
+    fig, ax = plt.subplots(figsize=(max(6, len(df) * 1.4), 4.5))
+    fig.suptitle("Query Coverage (evaluated vs skipped)", color="#e8eaf0", fontsize=15, y=1.01)
+
+    x = np.arange(len(df))
+    bottom = np.zeros(len(df))
+
+    ax.bar(x, df["n_evaluated"], color=_color(0), label="Evaluated", alpha=0.85)
+    bottom += df["n_evaluated"].values
+
+    for col, lbl, clr in zip(skip_cols, skip_labels, skip_colors):
+        ax.bar(x, df[col], bottom=bottom, color=clr, label=lbl, alpha=0.85)
+        bottom += df[col].values
+
+    for xi, (ev, tot) in enumerate(zip(df["n_evaluated"].values, df["n_queries"].values)):
+        pct = 100 * ev / tot if tot > 0 else 0
+        ax.text(xi, tot * 1.01, f"{pct:.1f}%",
+                ha="center", va="bottom", fontsize=8, color="#c8ccd8")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["row_label"], fontsize=8)
+    ax.set_ylabel("Query Count")
+    ax.legend(loc="upper right")
+    _save_or_show(fig, out, "05_query_coverage.png")
+
+
+def plot_recall_gap(df: pd.DataFrame, out: Path | None) -> None:
+    """
+    Bar chart of recall gain per K interval.
+    Shows where the model catches up — e.g. most gains K=10->50 vs K=50->100.
+    Works with 1 row.
+    """
+    df, ks = _parse_recalls(df)
+    if len(ks) < 2:
+        return
+
+    for _, row in df.iterrows():
+        vals = [row[f"recall@{k}"] for k in ks]
+        if any(np.isnan(v) for v in vals):
+            continue
+
+        gaps = [vals[0]] + [vals[i] - vals[i - 1] for i in range(1, len(vals))]
+        gap_labels = [f"0->{ks[0]}"] + [f"{ks[i-1]}->{ks[i]}" for i in range(1, len(ks))]
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        run_label = f"{row['run_id']}  |  {row['split']}"
+        fig.suptitle(f"Recall Gain per K Interval\n{run_label}",
+                     color="#e8eaf0", fontsize=13, y=1.02)
+
+        bars = ax.bar(gap_labels, gaps,
+                      color=[_color(i) for i in range(len(gaps))], alpha=0.85)
+        for bar, val in zip(bars, gaps):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                    f"+{val:.3f}", ha="center", va="bottom",
+                    fontsize=9, color="#c8ccd8")
+
+        ax.set_ylabel("Recall Gain")
+        ax.set_ylim(0, max(gaps) * 1.3)
+        safe = row["run_id"].replace(":", "-").replace("/", "-")
+        _save_or_show(fig, out, f"06_recall_gap_{safe}_{row['split']}.png")
+
+
+
 # 2. MRR over splits  (eval.csv)
 
 def plot_mrr_by_split(df: pd.DataFrame, out: Path | None) -> None:
@@ -301,6 +482,23 @@ def plot_recall_at_k(df: pd.DataFrame, out: Path | None) -> None:
 
 
 # helper functions
+def _parse_recalls(df: pd.DataFrame):
+    """Expand recalls_json into recall_at_K columns on a copy of df."""
+    df = df.copy()
+    all_ks: set[int] = set()
+    parsed = []
+    for v in df["recalls_json"]:
+        try:
+            d = json.loads(v) if pd.notna(v) and v != "" else {}
+        except (json.JSONDecodeError, TypeError):
+            d = {}
+        parsed.append({int(k): float(val) for k, val in d.items()})
+        all_ks.update(int(k) for k in d.keys())
+
+    for k in sorted(all_ks):
+        df[f"recall@{k}"] = [p.get(k, np.nan) for p in parsed]
+    return df, sorted(all_ks)
+
 
 def _save_or_show(fig: plt.Figure, out: Path | None, filename: str) -> None:
     if out is None:
@@ -312,31 +510,36 @@ def _save_or_show(fig: plt.Figure, out: Path | None, filename: str) -> None:
         print(f"  Saved → {path}")
     plt.close(fig)
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot RunLogger CSV outputs.")
-    parser.add_argument("--log-dir", default="logs", help="Directory containing the CSV files")
-    parser.add_argument("--out-dir", default="plots", help="Directory to write PNG files")
-    parser.add_argument("--show", action="store_true", help="Display plots interactively instead of saving")
+    parser.add_argument("--log-dir", default="logs")
+    parser.add_argument("--out-dir", default="plots")
+    parser.add_argument("--show", action="store_true")
     args = parser.parse_args()
 
     log_dir = Path(args.log_dir)
     out_dir = None if args.show else Path(args.out_dir)
 
     train_df = load_csv(log_dir / "training.csv")
-    eval_df = load_csv(log_dir / "RQ4_eval.csv")
+    eval_df  = load_csv(log_dir / "RQ4_eval.csv")
     early_df = load_csv(log_dir / "early_stop.csv")
 
-    print("Generating plots…")
+    print("Generating plots...")
 
     if train_df is not None:
         plot_training_loss(train_df, out_dir)
 
     if eval_df is not None:
+        # Always meaningful (work from 1 row)
+        plot_metrics_summary(eval_df, out_dir)
+        plot_recall_at_k(eval_df, out_dir)
+        plot_mrr_vs_recall_tradeoff(eval_df, out_dir)
+        plot_query_coverage(eval_df, out_dir)
+        plot_recall_gap(eval_df, out_dir)
+        # Only meaningful with multiple rows (guarded internally)
         plot_mrr_by_split(eval_df, out_dir)
         plot_negatives_vs_mrr(eval_df, out_dir)
         plot_skipped_breakdown(eval_df, out_dir)
-        plot_recall_at_k(eval_df, out_dir)
 
     if early_df is not None:
         plot_early_stop_scatter(early_df, out_dir)
