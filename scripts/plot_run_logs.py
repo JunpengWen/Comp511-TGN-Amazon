@@ -521,7 +521,7 @@ def main() -> None:
     out_dir = None if args.show else Path(args.out_dir)
 
     train_df = load_csv(log_dir / "training.csv")
-    eval_df  = load_csv(log_dir / "RQ4_eval.csv")
+    eval_df  = load_csv(log_dir / "eval.csv")
     early_df = load_csv(log_dir / "early_stop.csv")
 
     print("Generating plots...")
@@ -530,23 +530,21 @@ def main() -> None:
         plot_training_loss(train_df, out_dir)
 
     if eval_df is not None:
-        # Always meaningful (work from 1 row)
         plot_metrics_summary(eval_df, out_dir)
         plot_recall_at_k(eval_df, out_dir)
         plot_mrr_vs_recall_tradeoff(eval_df, out_dir)
-        plot_query_coverage(eval_df, out_dir)
+        # plot_query_coverage(eval_df, out_dir)
         plot_recall_gap(eval_df, out_dir)
-        # Only meaningful with multiple rows (guarded internally)
         plot_mrr_by_split(eval_df, out_dir)
-        plot_negatives_vs_mrr(eval_df, out_dir)
+        #plot_negatives_vs_mrr(eval_df, out_dir)
         plot_skipped_breakdown(eval_df, out_dir)
 
     if early_df is not None:
         plot_early_stop_scatter(early_df, out_dir)
         plot_epochs_completed_vs_best(early_df, out_dir)
 
-    if train_df is not None and eval_df is not None:
-        plot_loss_vs_mrr(train_df, eval_df, out_dir)
+    #if train_df is not None and eval_df is not None:
+        #plot_loss_vs_mrr(train_df, eval_df, out_dir)
 
     print("Done.")
 
